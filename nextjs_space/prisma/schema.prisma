@@ -1,0 +1,129 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/lockon_docs_app/nextjs_space/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String     @id @default(cuid())
+  email               String     @unique
+  name                String?
+  password            String
+  isAdmin             Boolean    @default(false)
+  isSuperAdmin        Boolean    @default(false)
+  suspendedAt         DateTime?
+  storageUsed         BigInt     @default(0)
+  storageLimit        BigInt     @default(5368709120)
+  emailVerified       DateTime?
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
+  folders             Folder[]
+  documents           Document[]
+  passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  auditLogs           AuditLog[]
+
+  @@index([email])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  detail    String?
+  ip        String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Folder {
+  id        String     @id @default(cuid())
+  userId    String
+  name      String
+  icon      String     @default("folder")
+  isDefault Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([userId])
+}
+
+model Document {
+  id               String   @id @default(cuid())
+  userId           String
+  folderId         String
+  name             String
+  cloudStoragePath String
+  isPublic         Boolean  @default(false)
+  fileSize         Int      @default(0)
+  mimeType         String   @default("image/jpeg")
+  thumbnailPath    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder           Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([folderId])
+  @@index([userId, folderId])
+}
+
+// Records the outcome of scheduled backup / verification jobs so the admin
+// Backups screen can surface real operational status (GitHub code push and
+// daily storage verification) instead of static informational text.
+model BackupLog {
+  id        String   @id @default(cuid())
+  // "github" for the weekly code push, "storage" for the daily S3 verification.
+  type      String
+  // "success" or "failed".
+  status    String
+  // Short human-readable summary line shown in the UI.
+  message   String?
+  // Structured extras: commit sha, branch, repo, file count, total bytes, etc.
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([type, createdAt])
+  @@index([createdAt])
+}

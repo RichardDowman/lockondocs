@@ -1,0 +1,234 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 25% 99%;
+    --foreground: 220 18% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 18% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 18% 12%;
+
+    /* Brand gold. Paired with dark text (primary-foreground) for strong
+       contrast on filled buttons. */
+    --primary: 40 63% 46%;
+    --primary-foreground: 40 45% 11%;
+
+    --secondary: 40 14% 94%;
+    --secondary-foreground: 220 22% 20%;
+
+    --muted: 220 12% 95%;
+    --muted-foreground: 220 10% 40%;
+
+    --accent: 42 46% 90%;
+    --accent-foreground: 38 55% 24%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 13% 88%;
+    --input: 220 13% 84%;
+    --ring: 40 63% 46%;
+
+    --radius: 0.625rem;
+    --radius-sm: calc(0.625rem - 4px);
+    --radius-lg: calc(0.625rem + 4px);
+    --radius-full: 9999px;
+
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    --spacing-2xl: 48px;
+    --spacing-3xl: 64px;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.03), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 350ms;
+
+    --chart-1: 40 63% 46%;
+    --chart-2: 42 74% 60%;
+    --chart-3: 220 14% 55%;
+    --chart-4: 38 45% 35%;
+    --chart-5: 220 12% 75%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 5.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 5.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 42 72% 55%;
+    --primary-foreground: 40 45% 10%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 42 72% 55%;
+
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.15), 0 1px 2px -1px rgb(0 0 0 / 0.15);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.2), 0 2px 4px -2px rgb(0 0 0 / 0.15);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.15);
+
+    --chart-1: 42 72% 55%;
+    --chart-2: 40 63% 46%;
+    --chart-3: 220 10% 65%;
+    --chart-4: 38 50% 45%;
+    --chart-5: 220 8% 45%;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.2);
+    color: hsl(var(--primary));
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background-color: transparent; }
+  ::-webkit-scrollbar-thumb { background-color: hsl(var(--border)); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background-color: hsl(var(--muted-foreground) / 0.5); }
+}
+
+@layer utilities {
+  /* Hide scrollbar */
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Hero background. Edge-fade layers sit on top of the tint layers so the
+     gold/grey tint fades to the page background at every edge, blending
+     cleanly into the white frame around the embed. */
+  .hero-gradient {
+    background-color: hsl(var(--background));
+    background-image:
+      /* Edge-fade layers (on top): fade every edge back to the page background
+         so the tint never touches the frame around the embed. */
+      linear-gradient(to right, hsl(var(--background)) 0%, transparent 16%, transparent 84%, hsl(var(--background)) 100%),
+      linear-gradient(to bottom, hsl(var(--background)) 0%, transparent 11%, transparent 89%, hsl(var(--background)) 100%),
+      /* Tint layers (underneath). */
+      radial-gradient(ellipse 70% 55% at 50% 8%, hsl(40 63% 46% / 0.16), transparent),
+      radial-gradient(ellipse 45% 40% at 82% 12%, hsl(42 74% 58% / 0.12), transparent),
+      radial-gradient(ellipse 45% 35% at 18% 14%, hsl(220 14% 55% / 0.08), transparent);
+  }
+
+  /* Prevent iOS text-size adjust and give app-like feel */
+  .no-select { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-top { padding-top: env(safe-area-inset-top); }
+
+  /* Metallic gold surface. Echoes the polished, light-reflecting gold of the
+     logo instead of a single flat fill. The diagonal multi-stop gradient gives
+     depth; the ::before pseudo adds a top-light sheen and a soft inner shadow
+     without touching the element's own box-shadow utilities. Kept on a
+     negative-z pseudo (with isolation) so the sheen sits above the fill but
+     below any in-flow text/icons, preserving legibility of dark text. */
+  .gold-surface {
+    position: relative;
+    isolation: isolate;
+    background-color: hsl(40 63% 46%);
+    background-image: linear-gradient(135deg,
+      hsl(46 76% 72%) 0%,
+      hsl(41 66% 53%) 33%,
+      hsl(36 57% 38%) 67%,
+      hsl(45 73% 63%) 100%);
+  }
+  .gold-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(157deg,
+      hsl(0 0% 100% / 0.45) 0%,
+      hsl(0 0% 100% / 0.08) 15%,
+      transparent 34%);
+    box-shadow: inset 0 1px 0 hsl(48 85% 92% / 0.6), inset 0 -3px 7px hsl(34 55% 22% / 0.4);
+  }
+
+  /* Optional slow shimmer sweep for hero/primary metallic surfaces. */
+  .gold-shimmer { overflow: hidden; }
+  .gold-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(115deg,
+      transparent 30%,
+      hsl(0 0% 100% / 0.5) 47%,
+      hsl(0 0% 100% / 0.15) 54%,
+      transparent 70%);
+    transform: translateX(-120%);
+    animation: gold-sweep 6s ease-in-out infinite;
+  }
+  @keyframes gold-sweep {
+    0%, 60% { transform: translateX(-120%); }
+    100% { transform: translateX(120%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gold-shimmer::after { animation: none; display: none; }
+  }
+
+  /* Soft polished-gold tile for pale accent icon backgrounds. */
+  .gold-tile {
+    background-color: hsl(42 46% 90%);
+    background-image: linear-gradient(150deg,
+      hsl(48 78% 92%) 0%,
+      hsl(42 60% 82%) 45%,
+      hsl(38 52% 72%) 100%);
+    box-shadow: inset 0 1px 0 hsl(48 90% 96% / 0.7);
+  }
+
+  .dark .hero-gradient {
+    background-color: hsl(var(--background));
+    background-image:
+      linear-gradient(to right, hsl(var(--background)) 0%, transparent 16%, transparent 84%, hsl(var(--background)) 100%),
+      linear-gradient(to bottom, hsl(var(--background)) 0%, transparent 11%, transparent 89%, hsl(var(--background)) 100%),
+      radial-gradient(ellipse 60% 50% at 50% 8%, hsl(42 72% 55% / 0.18), transparent),
+      radial-gradient(ellipse 40% 40% at 80% 12%, hsl(40 63% 46% / 0.12), transparent),
+      radial-gradient(ellipse 40% 30% at 20% 14%, hsl(220 12% 60% / 0.08), transparent);
+  }
+}
