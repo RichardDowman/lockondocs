@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { getAdminUser } from "@/lib/admin";
 import { recordAudit, getClientIp } from "@/lib/audit";
 import { createToken } from "@/lib/tokens";
-import { sendAppEmail, emailShell, baseUrl } from "@/lib/email";
+import { sendAppEmail, emailShell, emailButton, baseUrl } from "@/lib/email";
 
 // Per-user detail summary for the admin Users drawer.
 export async function GET(
@@ -185,7 +185,7 @@ export async function PATCH(
         data: {
           userId: target.id,
           token: hash,
-          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
       const link = `${baseUrl()}/reset-password?token=${raw}`;
@@ -195,9 +195,9 @@ export async function PATCH(
         subject: "Reset your LockonDocs password",
         html: emailShell(
           "Reset your password",
-          `<p>An administrator has initiated a password reset for your LockonDocs account.</p>
-           <p style="margin:24px 0;"><a href="${link}" style="background:#c8a44d; color:#1f2430; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold;">Reset password</a></p>
-           <p style="font-size:12px; color:#8a8f9a;">This link expires in 1 hour.</p>`,
+          `<p style="margin:0;">An administrator has initiated a password reset for your LockonDocs account.</p>
+           ${emailButton(link, "Reset password")}
+           <p style="margin:24px 0 0; color:#9aa0ad; font-size:13px;">This link expires in 24 hours.</p>`,
         ),
       }).catch(() => {});
       await recordAudit({

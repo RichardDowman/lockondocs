@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createToken } from "@/lib/tokens";
-import { sendAppEmail, emailShell, baseUrl } from "@/lib/email";
+import { sendAppEmail, emailShell, emailButton, baseUrl } from "@/lib/email";
 import { recordAudit, getClientIp } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       data: {
         userId: user.id,
         token: hash,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
       },
     });
 
@@ -44,9 +44,9 @@ export async function POST(req: NextRequest) {
       subject: "Reset your LockonDocs password",
       html: emailShell(
         "Reset your password",
-        `<p>We received a request to reset your LockonDocs password.</p>
-         <p style="margin:24px 0;"><a href="${link}" style="background:#c8a44d; color:#1f2430; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold;">Reset password</a></p>
-         <p style="font-size:12px; color:#8a8f9a;">This link expires in 1 hour. If you did not request it, no action is needed.</p>`,
+        `<p style="margin:0;">We received a request to reset the password for your LockonDocs account.</p>
+         ${emailButton(link, "Reset password")}
+         <p style="margin:24px 0 0; color:#9aa0ad; font-size:13px;">This link expires in 24 hours. If you did not request this, no action is needed and your password will stay the same.</p>`,
       ),
     });
 

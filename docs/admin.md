@@ -70,11 +70,13 @@ The original two-tab admin panel was replaced by a full-screen Admin console at 
 
 - Full audit log with action filter, free-text search (detail or user email) and date range, plus CSV export.
 
-### Backups
+### Backups (rebuilt in Build 20)
 
-- Informational page only (no separate in-app backup engine): explains platform-managed database snapshots, durable US cloud storage with time-limited signed links, and how to restore a snapshot. It also notes that encryption at rest is planned for a later phase and not yet enabled.
+- Live operational status, not static text. The generic informational cards were removed. The screen now shows two status cards driven by real job data: "Code backup to GitHub" (weekly) and "Storage verification" (daily). Each card shows the latest run as a success or failed pill with its timestamp, a short summary line, detail chips (commit, branch and file count for the code push; document count, total size and user count for storage), a short recent-runs history list, the schedule, and a Refresh button. A clean empty state shows before a job has run.
 
-- Endpoints live under `/api/admin` (stats, users, users/[id], audit) and all verify the role server-side.
+- Data source: two scheduled jobs record their outcome to a `BackupLog` table. The weekly job pushes the application source to the customer GitHub repository (RichardDowman/lockondocs, main branch). The daily job is a read-only storage verification that confirms every stored document is accounted for in durable cloud storage (document count, total bytes, distinct users); it is a verification and inventory snapshot, not a physical copy into a second bucket.
+
+- Endpoints live under `/api/admin` (stats, users, users/[id], audit, backups) and all verify the admin role server-side. A separate write-only `/api/backups/ingest` route lets the scheduled jobs record a result; it is authenticated with a shared Bearer secret (`BACKUP_INGEST_SECRET`), needs no admin session, and cannot read app data.
 
 ## Auth Hardening (related, Phase 2)
 

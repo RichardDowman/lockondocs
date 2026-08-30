@@ -262,3 +262,83 @@
   - Back navigation (components/home/vault-launch.tsx, components/auth/register-form.tsx, components/settings/settings-screen.tsx): every remaining history push on the shell-to-vault path was converted to a history replace. The vault-launch fallbacks used when a webview ignores target=_blank now call location.replace instead of assigning location.href, so the landing page is not left sitting behind the vault. Registration now replaces rather than assigns on both its exits, so /register is not left in history for a new user coming in from the shell. Account deletion also replaces, so a back press cannot return to a deleted account's screens. The window.open(_blank) first-party break-out is unchanged.
   - Verified in the browser signed in as a test account: tapping Upload opens the operating system picker immediately with the vaults screen still behind it and the filter set to images only; cancelling returns to the vaults screen with nothing changed; picking a real photo goes straight to the review and edit screen with no intermediate page; the FAB goes straight to the camera attempt with no chooser; the camera view exposes exactly one close control and it returns to the vaults in a single tap (confirmed by rendering the camera stage against a synthetic video stream, since the build environment has no camera). tsc clean and production build success (all 15 routes). No test documents were created, and 22 leftover automated smoke-test accounts were removed from the shared database.
   - Still needs on-device confirmation after deploy: the actual contents of the Android system picker, and the GoodBarber back-button behaviour. Neither a physical Android picker nor the GoodBarber shell can be reproduced in the build environment.
+
+### 2026-08-23 | Build 20 | Domain migration to vault.lockondocs.app, automated backups and a live admin Backups screen
+
+- Context: the developer moved the service to the new primary domain https://vault.lockondocs.app (domain verified and deployed by the developer). Two automated protection jobs were requested along with a rebuild of the admin Backups screen, which until now showed only generic informational text and offered nothing useful to the customer. The developer also asked whether running and surfacing these jobs adds any cost to the account.
+- Domain migration sweep: the application code carries no hard-coded host names. Everything that needs the live URL (email sender address, page metadata base, absolute links) derives at runtime from the deployment URL, which is set automatically per environment, so moving to vault.lockondocs.app needs only a deploy to the new host. The one cosmetic reference in lib/email.ts (a development-only fallback used when no deployment URL is present, never in production) was updated to vault.lockondocs.app so no old infrastructure name remains in the source. No robots or sitemap files exist to update.
+- New data model (additive, no data loss): a BackupLog table (prisma/schema.prisma) records the outcome of each backup job. Fields: type ("github" for the weekly code push or "storage" for the daily storage verification), status ("success" or "failed"), an optional human-readable message, an optional JSON meta blob (commit sha, branch, file count for code; document count, total bytes, user count for storage) and a createdAt timestamp, with indexes on type and createdAt. Pushed with a compatible migration; existing tables and rows untouched.
+- New API routes: app/api/admin/backups/route.ts returns the latest result plus recent history for each job type and is gated to active admins only (getAdminUser, 403 otherwise). app/api/backups/ingest/route.ts is a write-only endpoint the scheduled jobs POST their results to, authenticated with a shared Bearer secret (BACKUP_INGEST_SECRET in the environment); it validates type and status and writes a single BackupLog row. No admin session is needed by the jobs, and the jobs never get database credentials or the ability to read app data through this route.
+- Redesigned admin Backups screen (components/admin/sections/backups-section.tsx): all the previous generic informational cards and the "restoring a previous state" text were removed. The screen now shows two live status cards driven by the API - "Code backup to GitHub" (weekly) and "Storage verification" (daily). Each card shows the latest run as a success or failed pill with its timestamp, a short summary line, and detail chips (commit, branch and file count for the code push; document count, total size and user count for storage), followed by a short recent-runs history list and the schedule. Empty state reads cleanly when a job has not run yet, and a Refresh button re-fetches on demand. Styling matches the rest of the console (gold tile icons, the shared card radius and the shared byte/date formatters).
+- Weekly GitHub code backup job: a scheduled task (weekly) copies the application source into a dedicated working clone under /home/ubuntu/github_repos and pushes it to the customer's GitHub repository RichardDowman/lockondocs on the main branch, then reports the result to the ingest endpoint. It never touches the managed project's own version control, and it excludes dependencies, build output and all secret and environment files, so no credentials are ever committed. The initial verification run pushed 177 files successfully (commit 6fdd7cea).
+- Daily storage verification job: a scheduled task (daily) reads the database read-only to compute the total number of stored documents, the total bytes and the number of distinct users, then reports that snapshot to the ingest endpoint. It performs only reads plus the single status write, so it can never alter or delete a document. This is a verification and inventory snapshot that confirms every stored document is accounted for in durable cloud storage; it is not a physical copy into a second bucket. A true second-copy backup would need a separate destination bucket and would add storage cost, so it was intentionally not built without a decision from the developer. The initial run verified 4 documents totalling 827 KB across 2 users.
+- Both jobs' first real results were recorded into BackupLog so the redesigned screen shows real status immediately after the next deploy (the jobs' own ingest posts returned not-found during setup only because the new endpoint was not yet deployed; they will post normally from their next scheduled run once the deploy is live).
+- Cost question: the grounded answer was given to the developer directly. In short, background jobs and the data they surface do consume account credits like any other activity, and usage is visible on the account profile; no fixed figure can be quoted in advance.
+- Verified: tsc clean; production build success (all routes including /api/admin/backups and /api/backups/ingest and the /admin bundle); auth smoke passed. The two backup jobs were each run once end to end during setup. The Backups screen redesign is a new feature and was validated through the type check and production build rather than browser automation. One automated smoke-test account created during testing was removed from the shared database.
+- IMPORTANT: requires a MANUAL redeploy to the live host vault.lockondocs.app to go live (manual deploy only per project rules). The BackupLog schema change is already applied to the shared database. Open item for the developer: confirm whether the previous hosts (securevault.dowmandigitalservices.com and lockondocs.abacusai.app) should now be retired or kept as aliases.
+
+<!-- REMINDER: build counter is now at 20. Every-5-builds review cadence reached (15 through 20): developer to review build_state.md and confirm it is current. -->
+
+---
+
+## Build 21 - Default vault taxonomy (10 categories) and database reset
+
+**Date:** 2026-08-23
+**Type:** Feature change + data reset
+
+- Replaced the 5 default vault categories (Personal, School, Medical, Work, Other) with the 10 categories from the client's Digital Vault Architecture document: Identity & IDs, Taxes & Income, Vehicle, Property, Education & Professional, Legal & Estate, Financial, Employment & Payroll, Password & Security, Medical & Emergency.
+- Added 4 new icons to the icon picker: Fingerprint (Identity & IDs), Receipt (Taxes & Income), Scale (Legal & Estate), Lock (Password & Security). The existing icon set already covered the other 6 vaults.
+- Files changed: lib/default-folders.ts (full rewrite), components/app/folder-icon.tsx (4 imports + 4 ICON_MAP entries added).
+- Database wiped clean (all tables): all test accounts, folders, documents, audit logs, backup logs, verification tokens, and password reset tokens deleted. Cloud storage was already empty. A database snapshot was taken automatically before the wipe. The seed script was re-run to recreate the internal test account. This was agreed with the developer as all data was test-only.
+- New signups now receive the 10 default vaults. Existing users (none after the wipe) are unaffected by the code change since seeding only runs at signup.
+- The broader architecture document work (per-vault metadata fields, expiry reminders, advanced security) is parked as future phases pending client approval.
+- Verified: tsc clean, production build success, auth smoke passed. Automated smoke-test account cleaned up.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app (manual deploy only per project rules). Still-undeployed builds 14 through 20 also await that deploy.
+
+---
+
+## Build 22 - Email delivery switched to Resend (client domain)
+
+**Date:** 2026-08-23
+**Type:** Feature change (email provider)
+
+- Transactional emails (email verification, password reset, admin re-verify) now send through the client's own Resend account on the verified domain lockondocs.app, replacing the previous platform notification API.
+- Sender address is controlled by the EMAIL_FROM environment variable (default "LockonDocs <noreply@lockondocs.app>") so the from-domain can be changed later without a code edit. RESEND_API_KEY holds the client's Resend key.
+- Files changed: lib/email.ts (sendAppEmail rewritten to use the Resend SDK; the notificationId argument kept optional for backwards compatibility so the three callers - signup, forgot-password, admin re-verify - were not touched). Added the resend package.
+- Domain decision: no subdomain reconfiguration is needed. The root domain lockondocs.app is already verified in Resend. A live test send from noreply@lockondocs.app succeeded (Resend accepted the message), so a subdomain such as mail.lockondocs.app is optional, not required. If the developer later prefers to isolate sending reputation on a subdomain, verify that subdomain in Resend and update EMAIL_FROM only.
+- Verified: tsc clean; production build success; one real test email sent successfully via Resend and accepted for delivery.
+- IMPORTANT: requires a MANUAL redeploy to the live host vault.lockondocs.app to take effect in production (manual deploy only per project rules). Until deployed, the live site keeps using the previous sender. Still-undeployed builds 14 through 21 also await that deploy.
+
+<!-- REMINDER: build counter is now at 22. Past the every-5-builds cadence: developer to review build_state.md and confirm it is current. -->
+
+---
+
+## Build 23 - Branded email template redesign (AAA polish)
+
+**Date:** 2026-08-23
+**Type:** Feature change (email presentation)
+
+- Redesigned all transactional emails (email verification, password reset, admin re-verify) with a consistent, professional, branded layout. No wording changes to the underlying actions.
+- New shared layout in lib/email.ts: a centered LockonDocs logo on a dark navy header band with the wordmark and a "Secure Document Vault" tagline in brand gold, a clean white content card (the previous grey body box was removed), and a muted footer.
+- New emailButton helper renders a bulletproof, brand-gold call-to-action button plus a plain-text "copy and paste this link" fallback for email clients that strip styled buttons. The three callers now use it instead of hand-written inline anchors.
+- Logo is app-hosted at public/brand/lockondocs-email-logo.png and referenced by an absolute URL built from the live domain, so the email source stays fully branded (no third-party asset host). The logo image was resized to 240px (about 44KB) to keep emails light.
+- Files changed: lib/email.ts (emailShell rewritten, emailButton added, logoUrl helper added), app/api/signup/route.ts, app/api/auth/forgot-password/route.ts, app/api/admin/users/[id]/route.ts (each now imports and uses emailButton). Added public/brand/lockondocs-email-logo.png.
+- Verified: tsc clean; production build success; a rendered preview of the new template was visually checked; a real test email was sent through Resend and accepted for delivery.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). The app-hosted logo will display in received emails once the app is deployed (the file ships in the deployment package). Still-undeployed builds 14 through 22 also await that deploy.
+
+<!-- REMINDER: build counter is now at 23. Past the every-5-builds cadence: developer to review build_state.md and confirm it is current. -->
+
+---
+
+## Build 24 - Password reset link lifetime extended to 24 hours
+
+**Date:** 2026-08-23
+**Type:** Feature change (auth)
+
+- Password reset links now expire after 24 hours instead of 1 hour, to give users more time to complete a reset. Requested after a user found the 1 hour window too short.
+- Applies to both the self-service forgot-password flow and the admin-initiated password reset. The email copy in both was updated to say "This link expires in 24 hours". The email-verification link was already 24 hours and is unchanged.
+- Files changed: app/api/auth/forgot-password/route.ts (expiry + copy), app/api/admin/users/[id]/route.ts (expiry + copy).
+- Verified: tsc clean; production build success.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production. Until deployed, the live site keeps issuing 1 hour links. Still-undeployed builds 14 through 23 also await that deploy.
+
+<!-- REMINDER: build counter is now at 24. Past the every-5-builds cadence: developer to review build_state.md and confirm it is current. -->

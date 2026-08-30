@@ -24,7 +24,7 @@
    - `build_state.md`
    - The relevant feature doc for the task (e.g. `scanner.md`, `files.md`, `admin.md`, `production.md`)
 
-2. **NEVER auto-deploy.** Always checkpoint and wait for explicit manual deploy instruction from the developer. The live app runs on two hosts (lockondocs.abacusai.app and securevault.dowmandigitalservices.com); a deploy must update both.
+2. **NEVER auto-deploy.** Always checkpoint and wait for explicit manual deploy instruction from the developer. As of Build 20 the service was migrated to the new primary host vault.lockondocs.app; deploy there. The previous hosts (securevault.dowmandigitalservices.com and lockondocs.abacusai.app) are pending a retire-or-keep decision from the developer - until confirmed, check with the developer which hosts a deploy should update.
 
 3. **Documentation format:** Always `.md` unless otherwise instructed.
 
@@ -36,7 +36,7 @@
 
 ### Build Tracking
 
-- **Build counter:** Track all builds in `build_state.md`. Current counter: 17.
+- **Build counter:** Track all builds in `build_state.md`. Current counter: 20.
 - **Prompt the user** to review/update `build_state.md` every 5 build updates.
 - `build_state.md` is **always additive** - never remove entries, only append new ones.
 
@@ -106,9 +106,9 @@ Additional feature docs will be added as the project grows.
 | Database | PostgreSQL |
 | Storage | Amazon S3 (US) |
 | Camera API | getUserMedia |
-| Deploy | Manual only (two hosts) |
+| Deploy | Manual only (primary host vault.lockondocs.app) |
 | Docs format | .md |
 | Currency | GBP (USD at ~1.27) |
 | Data sensitivity | High (PII, medical, school) |
-| Build counter | 17 |
+| Build counter | 20 |
 | Current phase | Phase 2 complete; Phase 3 next |

@@ -106,10 +106,22 @@ These are considerations for the developer and Tracey to confirm. They are not l
 - **HIPAA:** most likely does not apply, because HIPAA governs healthcare providers and their business associates, not individuals storing their own medical documents in a personal vault. Because a "Medical" folder is prominent, get this confirmed rather than assumed.
 - **Policy documents:** a short written data-handling and retention policy will help with app-store review and user trust.
 
+## Domain migration (Build 20, 2026-08-23)
+
+- The service was migrated to the new primary host **vault.lockondocs.app** (domain verified and deployed by the developer). The application code carries no hard-coded host names: the email sender address, page metadata and absolute links all derive at runtime from the deployment URL, which is set automatically per environment, so migration needs only a deploy to the new host.
+- Open decision: whether to retire the previous hosts (securevault.dowmandigitalservices.com and lockondocs.abacusai.app) or keep them as aliases.
+
+## Automated backups (Build 20)
+
+- **Weekly code backup to GitHub:** a scheduled job pushes the application source to RichardDowman/lockondocs (main). It uses a dedicated working clone, never touches the managed project's own version control, and excludes dependencies, build output and all secret and environment files, so no credentials are committed.
+- **Daily storage verification:** a scheduled job reads the database read-only to confirm document count, total bytes and distinct users, and records the snapshot. It performs only reads plus a single status write, so it cannot alter or delete documents. This is a verification and inventory snapshot, not a physical second copy. A true second-copy backup would need a separate destination bucket and would add storage cost; it was intentionally deferred pending a developer decision (see open decisions).
+- Both jobs record their result to the `BackupLog` table (via the `/api/backups/ingest` endpoint), and the admin Backups screen surfaces the latest status and history.
+
 ## Production cutover checklist
 
 When the new production URL and delegate access are available:
 
+- [x] Point the app at the new production domain (vault.lockondocs.app, Build 20)
 - [ ] Point the app at the new production domain
 - [ ] Provision production database in a US region
 - [ ] Provision production S3 bucket in a US region, with default encryption + block-public-access confirmed
@@ -127,6 +139,8 @@ When the new production URL and delegate access are available:
 - **Email verification:** required before first login, or soft (allow login, nudge to verify)?
 - **COPPA / HIPAA applicability:** confirm with Tracey given the data types.
 - **Custom folder icons:** awaiting graphics from Tracey.
+- **Legacy hosts:** retire securevault.dowmandigitalservices.com and lockondocs.abacusai.app now that vault.lockondocs.app is primary, or keep them as aliases?
+- **True second-copy storage backup:** the daily job currently verifies durable storage rather than copying to a second bucket. Decide whether a physical second-copy backup (separate destination bucket, added storage cost) is wanted before wider launch.
 
 ---
 

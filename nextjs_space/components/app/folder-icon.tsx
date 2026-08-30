@@ -11,6 +11,10 @@ import {
   Home,
   Plane,
   Car,
+  Fingerprint,
+  Receipt,
+  Scale,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +29,10 @@ const ICON_MAP: Record<string, LucideIcon> = {
   home: Home,
   plane: Plane,
   car: Car,
+  fingerprint: Fingerprint,
+  receipt: Receipt,
+  scale: Scale,
+  lock: Lock,
 };
 
 export function FolderIcon({

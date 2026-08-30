@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { DEFAULT_FOLDERS } from "@/lib/default-folders";
 import { validatePassword } from "@/lib/validation";
 import { createToken } from "@/lib/tokens";
-import { sendAppEmail, emailShell, baseUrl } from "@/lib/email";
+import { sendAppEmail, emailShell, emailButton, baseUrl } from "@/lib/email";
 import { recordAudit, getClientIp } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
@@ -76,9 +76,9 @@ export async function POST(req: NextRequest) {
         subject: "Confirm your LockonDocs email",
         html: emailShell(
           "Confirm your email",
-          `<p>Welcome to LockonDocs. Please confirm your email address to secure your account.</p>
-           <p style="margin:24px 0;"><a href="${link}" style="background:#c8a44d; color:#1f2430; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirm email</a></p>
-           <p style="font-size:12px; color:#8a8f9a;">This link expires in 24 hours.</p>`,
+          `<p style="margin:0;">Welcome to LockonDocs. Please confirm your email address to activate and secure your account.</p>
+           ${emailButton(link, "Confirm email address")}
+           <p style="margin:24px 0 0; color:#9aa0ad; font-size:13px;">This link expires in 24 hours.</p>`,
         ),
       });
     } catch (e) {
