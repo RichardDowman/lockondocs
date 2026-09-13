@@ -106,3 +106,14 @@ Browser-based document capture with three ways to add content: (1) scan with the
 - Cloud storage setup (S3 bucket, upload API)
 - Database schema (documents table with metadata)
 - Authentication (user ID for document ownership)
+
+## Capturing vault fields at save time (Build 25, Phase A)
+
+The save step now renders the selected vault's fields as inputs (text, number, date picker, or choice dropdown) below the vault chooser, so document details are captured at the moment of saving. Values are sent with the document create request, sanitised against the vault's field definitions, and stored as the document's metadata plus a derived search string. Fields shown are driven by the chosen vault; switching the vault switches the fields. See files.md for the full field model and the custom field builder.
+
+## Preview thumbnails and no auto-trim (Build 26)
+
+Two refinements to the save step, from testing feedback:
+
+- No initial trim: the default crop now covers the whole frame, so an uploaded or captured image opens showing the complete picture with nothing trimmed. The user applies their own crop only if they want one.
+- Preview thumbnails: when a document is saved, a small 3:4 preview is generated for scanned photos and for PDFs built from a scan. By default the whole page is fitted onto a white background so nothing is cut off. A "Set preview thumbnail" control opens a framing dialog with a draggable, resizable 3:4 frame so the user can choose exactly what the grid tile shows. Externally uploaded PDFs have no source image, so they keep the generic PDF icon. See files.md for how tiles render the thumbnail.

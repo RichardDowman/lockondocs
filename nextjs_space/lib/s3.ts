@@ -35,6 +35,13 @@ export async function generatePresignedUploadUrl(
     Bucket: bucketName,
     Key: cloud_storage_path,
     ContentType: contentType,
+    // Explicitly assert server-side encryption at rest (SSE-S3 / AES-256) on
+    // every uploaded object. The bucket already applies this by default; making
+    // it explicit means the app actively requires encryption. Because this adds
+    // x-amz-server-side-encryption to the signed headers, the client PUT MUST
+    // send a matching "x-amz-server-side-encryption: AES256" header or S3
+    // returns 403.
+    ServerSideEncryption: "AES256",
   });
 
   const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });

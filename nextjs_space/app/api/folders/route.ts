@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getGenericFields, coerceFieldDefs } from "@/lib/vault-fields";
 
 export async function GET() {
   try {
@@ -24,6 +25,7 @@ export async function GET() {
       name: f.name,
       icon: f.icon,
       isDefault: f.isDefault,
+      fields: coerceFieldDefs(f.fields),
       documentCount: f?._count?.documents ?? 0,
       createdAt: f.createdAt,
     }));
@@ -54,8 +56,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Vault name is too long." }, { status: 400 });
     }
 
+    // Custom vaults start with a sensible generic field set which the owner can
+    // fully customise later with the field builder.
     const folder = await prisma.folder.create({
-      data: { userId, name, icon, isDefault: false },
+      data: { userId, name, icon, isDefault: false, fields: getGenericFields() as any },
     });
 
     return NextResponse.json({ folder }, { status: 201 });

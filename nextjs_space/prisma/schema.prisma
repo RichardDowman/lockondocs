@@ -22,6 +22,15 @@ model User {
   emailVerified       DateTime?
   failedLoginAttempts Int        @default(0)
   lockedUntil         DateTime?
+  // How many days ahead of an expiry date the user is warned. Default 30.
+  reminderLeadDays    Int        @default(30)
+  // Whether the user receives branded expiry reminder emails (one "expiring
+  // soon" and one "expired" per document). In-app reminders are unaffected.
+  emailRemindersEnabled Boolean  @default(true)
+  // Idle minutes before the vault auto-locks on this device. 0 means never.
+  // Default 5. The lock is a client-side overlay that also triggers when the
+  // app is backgrounded and reopened, so the login session itself is kept.
+  autoLockMinutes     Int        @default(5)
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
   deletedAt           DateTime?
@@ -80,6 +89,10 @@ model Folder {
   name      String
   icon      String     @default("folder")
   isDefault Boolean    @default(false)
+  // Tailored metadata schema for documents stored in this vault. An array of
+  // field definitions: { key, label, type (text|date|number|select), options? }.
+  // Seeded per-vault for default vaults; user-editable via the field builder.
+  fields    Json?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -98,6 +111,24 @@ model Document {
   fileSize         Int      @default(0)
   mimeType         String   @default("image/jpeg")
   thumbnailPath    String?
+  // Captured values for this vault's tailored fields: { fieldKey: value }.
+  metadata         Json?
+  // Denormalized expiry / renewal date, derived from the vault's designated
+  // expiry date field at save time. Indexed so reminder queries stay cheap.
+  expiryDate       DateTime?
+  // Set when the user dismisses this document's expiry reminder. Cleared
+  // automatically whenever expiryDate changes so a new date resurfaces it.
+  reminderDismissedAt DateTime?
+  // Set once the single "expiring soon" reminder email has been sent for the
+  // current expiryDate. Cleared when expiryDate changes so a renewed document
+  // can warn again. Ensures exactly one soon email per expiry cycle.
+  reminderSoonSentAt DateTime?
+  // Set once the single "expired" reminder email has been sent for the current
+  // expiryDate. Cleared when expiryDate changes. One expired email per cycle.
+  reminderExpiredSentAt DateTime?
+  // Denormalized lowercase concatenation of name + all metadata values, used
+  // to power search across every field (not just the document name).
+  searchText       String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -106,6 +137,35 @@ model Document {
   @@index([userId])
   @@index([folderId])
   @@index([userId, folderId])
+  @@index([userId, expiryDate])
+}
+
+// Records every transactional email the app sends (reminders, resets,
+// verification) so the admin Emails screen can show what was sent, to whom,
+// when, and whether the send was accepted. "status" reflects the send outcome
+// (accepted by the mail provider), not a mailbox delivery confirmation.
+model EmailLog {
+  id             String   @id @default(cuid())
+  // Recipient user id where known (null for sends to non-account addresses).
+  userId         String?
+  recipientEmail String
+  // Message category: "reminder_soon", "reminder_expired", "password_reset",
+  // "email_verification", etc.
+  type           String
+  subject        String
+  // Short truncated plain-text preview of the email body (~140 chars).
+  preview        String?
+  // "sent" when the provider accepted the message, "failed" otherwise.
+  status         String   @default("sent")
+  // Provider error message when status is "failed".
+  error          String?
+  // Related document id for expiry reminder emails, where applicable.
+  documentId     String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([type])
 }
 
 // Records the outcome of scheduled backup / verification jobs so the admin

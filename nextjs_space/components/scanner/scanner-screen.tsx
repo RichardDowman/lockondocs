@@ -19,6 +19,7 @@ import {
   Plus,
   Trash2,
   Files,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,19 +37,33 @@ import {
   loadImage,
   renderProcessedPage,
   buildPdfFromImages,
+  renderThumbnailContain,
+  renderThumbnailCover,
+  centeredFrame,
   type CropRect,
   type ProcessedPage,
 } from "@/lib/imaging";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { takePendingUpload } from "@/lib/pending-upload";
+import type { FieldDef } from "@/lib/vault-fields";
 
 interface FolderItem {
   id: string;
   name: string;
+  fields: FieldDef[];
 }
 
 type Stage = "choose" | "loading" | "camera" | "nocamera" | "edit" | "saving";
 
-const DEFAULT_CROP: CropRect = { x: 0.08, y: 0.08, w: 0.84, h: 0.84 };
+// Start the crop box at the full frame so an upload is never trimmed until the
+// user actively drags the handles inward.
+const DEFAULT_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 };
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
@@ -110,6 +125,9 @@ export function ScannerScreen({
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const cropLayerRef = useRef<HTMLDivElement | null>(null);
+  const thumbLayerRef = useRef<HTMLDivElement | null>(null);
+  const thumbSourceRef = useRef<HTMLImageElement | null>(null);
+  const thumbDragRef = useRef<{ startXn: number; startYn: number; startRect: CropRect } | null>(null);
   const dragRef = useRef<
     | { mode: "move" | "nw" | "ne" | "sw" | "se"; startXn: number; startYn: number; startRect: CropRect }
     | null
@@ -133,7 +151,20 @@ export function ScannerScreen({
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [folderId, setFolderId] = useState<string>(initialFolderId ?? "");
   const [docName, setDocName] = useState("");
+  // Captured values for the chosen vault's tailored fields, keyed by field key.
+  const [metaValues, setMetaValues] = useState<Record<string, string>>({});
   const [preparing, setPreparing] = useState(false);
+  // A user-chosen preview thumbnail (optional). When unset, a "whole page"
+  // thumbnail is generated automatically at save time.
+  const [thumbBlob, setThumbBlob] = useState<Blob | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [thumbOpen, setThumbOpen] = useState(false);
+  const [thumbFrame, setThumbFrame] = useState<CropRect | null>(null);
+  const [thumbSize, setThumbSize] = useState(1);
+  const [thumbBusy, setThumbBusy] = useState(false);
+  // The image shown inside the framing dialog. The overlay layer wraps the
+  // rendered <img> (inline-block) so the frame lines up exactly.
+  const [thumbImgUrl, setThumbImgUrl] = useState<string | null>(null);
 
   const stopStream = useCallback(() => {
     const s = streamRef.current;
@@ -174,6 +205,7 @@ export function ScannerScreen({
         const list: FolderItem[] = (data?.folders ?? []).map((f: any) => ({
           id: f.id,
           name: f.name,
+          fields: Array.isArray(f.fields) ? f.fields : [],
         }));
         setFolders(list);
         if (!initialFolderId && list.length > 0) {
@@ -221,6 +253,8 @@ export function ScannerScreen({
         setRotation(0);
         setCropRect(null);
         setCropping(false);
+        setThumbBlob(null);
+        setThumbUrl(null);
         setStage("edit");
         setTimeout(() => renderPreview(100, 100, 0), 30);
       };
@@ -456,6 +490,9 @@ export function ScannerScreen({
       setContrast(100);
       setCropRect(null);
       setCropping(false);
+      // The working image changed, so any previously set thumbnail is stale.
+      setThumbBlob(null);
+      setThumbUrl(null);
       setTimeout(() => renderPreview(100, 100, 0), 20);
     } catch (err) {
       toast.error("Could not crop the image.");
@@ -468,6 +505,118 @@ export function ScannerScreen({
     return renderProcessedPage(img, { rotation, crop: null, brightness, contrast });
   }, [rotation, brightness, contrast]);
 
+  // --- Preview thumbnail framing ---
+  // Bake the first/current page (with its current rotation and adjustments) and
+  // open a dialog where the user drags a portrait frame to choose the part of
+  // the document shown on the vault tile.
+  const openThumbDialog = useCallback(async () => {
+    try {
+      setThumbBusy(true);
+      const baked = pages[0] ? pages[0] : await bakeCurrent();
+      if (!baked) {
+        toast.error("Add a page first.");
+        return;
+      }
+      const img = await loadImage(baked.dataUrl);
+      thumbSourceRef.current = img;
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      setThumbImgUrl(baked.dataUrl);
+      setThumbSize(1);
+      setThumbFrame(centeredFrame(w, h, undefined, 1));
+      setThumbOpen(true);
+    } catch (err) {
+      toast.error("Could not open the thumbnail tool.");
+    } finally {
+      setThumbBusy(false);
+    }
+  }, [pages, bakeCurrent]);
+
+  const thumbNormFromEvent = useCallback((e: React.PointerEvent) => {
+    const layer = thumbLayerRef.current;
+    if (!layer) return { xn: 0, yn: 0 };
+    const r = layer.getBoundingClientRect();
+    return {
+      xn: clamp((e.clientX - r.left) / r.width, 0, 1),
+      yn: clamp((e.clientY - r.top) / r.height, 0, 1),
+    };
+  }, []);
+
+  const startThumbDrag = (e: React.PointerEvent) => {
+    if (!thumbFrame) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const { xn, yn } = thumbNormFromEvent(e);
+    thumbDragRef.current = { startXn: xn, startYn: yn, startRect: thumbFrame };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+
+  const onThumbPointerMove = (e: React.PointerEvent) => {
+    const d = thumbDragRef.current;
+    if (!d) return;
+    const { xn, yn } = thumbNormFromEvent(e);
+    const s = d.startRect;
+    const x = clamp(s.x + (xn - d.startXn), 0, 1 - s.w);
+    const y = clamp(s.y + (yn - d.startYn), 0, 1 - s.h);
+    setThumbFrame({ x, y, w: s.w, h: s.h });
+  };
+
+  const onThumbPointerUp = () => {
+    thumbDragRef.current = null;
+  };
+
+  const onThumbSizeChange = (val: number) => {
+    setThumbSize(val);
+    const img = thumbSourceRef.current;
+    if (!img) return;
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const base = centeredFrame(w, h, undefined, val);
+    setThumbFrame((prev) => {
+      if (!prev) return base;
+      // Keep the frame centred on its current middle while resizing.
+      const cx = prev.x + prev.w / 2;
+      const cy = prev.y + prev.h / 2;
+      const x = clamp(cx - base.w / 2, 0, 1 - base.w);
+      const y = clamp(cy - base.h / 2, 0, 1 - base.h);
+      return { x, y, w: base.w, h: base.h };
+    });
+  };
+
+  const applyThumbFrame = async () => {
+    const img = thumbSourceRef.current;
+    if (!img || !thumbFrame) return;
+    try {
+      setThumbBusy(true);
+      const t = await renderThumbnailCover(img, { frame: thumbFrame });
+      setThumbBlob(t.blob);
+      setThumbUrl(t.dataUrl);
+      setThumbOpen(false);
+      toast.success("Preview thumbnail set.");
+    } catch (err) {
+      toast.error("Could not set the thumbnail.");
+    } finally {
+      setThumbBusy(false);
+    }
+  };
+
+  const useWholePageThumb = async () => {
+    const img = thumbSourceRef.current;
+    if (!img) return;
+    try {
+      setThumbBusy(true);
+      const t = await renderThumbnailContain(img);
+      setThumbBlob(t.blob);
+      setThumbUrl(t.dataUrl);
+      setThumbOpen(false);
+      toast.success("Preview set to the whole page.");
+    } catch (err) {
+      toast.error("Could not set the thumbnail.");
+    } finally {
+      setThumbBusy(false);
+    }
+  };
+
   const resetWorking = useCallback(() => {
     sourceImageRef.current = null;
     setRotation(0);
@@ -475,6 +624,8 @@ export function ScannerScreen({
     setContrast(100);
     setCropRect(null);
     setCropping(false);
+    setThumbBlob(null);
+    setThumbUrl(null);
   }, []);
 
   const addPage = async () => {
@@ -518,6 +669,10 @@ export function ScannerScreen({
       let mimeType: string;
       let ext: string;
       let name: string;
+      // A small JPEG shown on the vault tile. Generated for every scanned
+      // document (image or scan-built PDF). Externally uploaded PDFs have no
+      // source image, so they keep the generic PDF tile.
+      let thumbToUpload: Blob | null = null;
 
       if (pdfFile) {
         blob = pdfFile;
@@ -547,6 +702,19 @@ export function ScannerScreen({
         name =
           docName.trim() ||
           `Scan ${new Date().toLocaleDateString("en-GB", { timeZone: "UTC" })}`;
+        // Use the user's chosen preview if they set one, otherwise fall back to
+        // the whole first page letterboxed on a white card (nothing cropped).
+        try {
+          if (thumbBlob) {
+            thumbToUpload = thumbBlob;
+          } else {
+            const firstImg = await loadImage(allPages[0].dataUrl);
+            const t = await renderThumbnailContain(firstImg);
+            thumbToUpload = t.blob;
+          }
+        } catch {
+          thumbToUpload = null;
+        }
       }
 
       const safeFileName = `${name.replace(/[^a-zA-Z0-9._-]/g, "_")}.${ext}`;
@@ -565,13 +733,55 @@ export function ScannerScreen({
 
       const putRes = await fetch(presign.uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": mimeType },
+        headers: {
+          "Content-Type": mimeType,
+          // Must match the ServerSideEncryption set on the presigned command.
+          "x-amz-server-side-encryption": "AES256",
+        },
         body: blob,
       });
       if (!putRes.ok) {
         toast.error("Upload failed. Please try again.");
         setStage("edit");
         return;
+      }
+
+      // Upload the preview thumbnail (best effort; never blocks the save).
+      let thumbnailPath: string | null = null;
+      if (thumbToUpload) {
+        try {
+          const tName = `${name.replace(/[^a-zA-Z0-9._-]/g, "_")}_thumb.jpg`;
+          const tPresignRes = await fetch("/api/upload/presigned", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fileName: tName,
+              contentType: "image/jpeg",
+              fileSize: thumbToUpload.size,
+            }),
+          });
+          const tPresign = await tPresignRes.json().catch(() => ({}));
+          if (tPresignRes.ok && tPresign?.uploadUrl) {
+            const tPut = await fetch(tPresign.uploadUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "image/jpeg",
+                "x-amz-server-side-encryption": "AES256",
+              },
+              body: thumbToUpload,
+            });
+            if (tPut.ok) thumbnailPath = tPresign.cloud_storage_path;
+          }
+        } catch {
+          thumbnailPath = null;
+        }
+      }
+
+      const selectedFolder = folders.find((f) => f.id === folderId);
+      const metadata: Record<string, string> = {};
+      for (const field of selectedFolder?.fields ?? []) {
+        const raw = (metaValues[field.key] ?? "").trim();
+        if (raw) metadata[field.key] = raw;
       }
 
       const metaRes = await fetch("/api/documents", {
@@ -583,6 +793,8 @@ export function ScannerScreen({
           cloudStoragePath: presign.cloud_storage_path,
           mimeType,
           fileSize: blob.size,
+          thumbnailPath,
+          metadata,
         }),
       });
       const meta = await metaRes.json().catch(() => ({}));
@@ -598,7 +810,7 @@ export function ScannerScreen({
       toast.error("Something went wrong while saving.");
       setStage("edit");
     }
-  }, [bakeCurrent, docName, folderId, pages, router, saveAsPdf, pdfFile]);
+  }, [bakeCurrent, docName, folderId, folders, metaValues, pages, router, saveAsPdf, pdfFile, thumbBlob]);
 
   const close = useCallback(() => {
     stopStream();
@@ -934,6 +1146,40 @@ export function ScannerScreen({
               </Select>
             </div>
 
+            {(folders.find((f) => f.id === folderId)?.fields ?? []).map((field) => (
+              <div key={field.key} className="space-y-2">
+                <Label>{field.label}</Label>
+                {field.type === "select" ? (
+                  <Select
+                    value={metaValues[field.key] ?? ""}
+                    onValueChange={(v) => setMetaValues((prev) => ({ ...prev, [field.key]: v }))}
+                    disabled={stage === "saving"}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={`Choose ${field.label.toLowerCase()}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(field.options ?? []).map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+                    value={metaValues[field.key] ?? ""}
+                    onChange={(e) =>
+                      setMetaValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    placeholder={field.type === "text" ? field.label : undefined}
+                    disabled={stage === "saving"}
+                  />
+                )}
+              </div>
+            ))}
+
             {!pdfFile && (
               <>
                 <div className="space-y-2">
@@ -991,6 +1237,34 @@ export function ScannerScreen({
                     <span className="h-4 w-4 rounded-full bg-white shadow" />
                   </span>
                 </button>
+
+                {/* Preview thumbnail chooser */}
+                <div className="flex items-center justify-between rounded-[var(--radius)] border border-border px-3 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-9 items-center justify-center overflow-hidden rounded border border-border bg-muted">
+                      {thumbUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={thumbUrl} alt="Preview thumbnail" className="h-full w-full object-cover" />
+                      ) : (
+                        <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm">Preview thumbnail</p>
+                      <p className="text-xs text-muted-foreground">
+                        {thumbUrl ? "Custom preview set" : "Whole page used by default"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openThumbDialog}
+                    disabled={stage === "saving" || thumbBusy}
+                    className="text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+                  >
+                    {thumbUrl ? "Change" : "Set preview thumbnail"}
+                  </button>
+                </div>
               </>
             )}
 
@@ -1032,6 +1306,82 @@ export function ScannerScreen({
           <p className="mt-3 text-sm text-white/80">Preparing your photo...</p>
         </div>
       )}
+
+      {/* Preview thumbnail framing dialog */}
+      <Dialog open={thumbOpen} onOpenChange={(o) => !thumbBusy && setThumbOpen(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Set preview thumbnail</DialogTitle>
+            <DialogDescription>
+              Drag the frame to choose the part of the document shown on its vault
+              tile. Use the slider to change how much is included.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-center">
+            <div className="relative inline-block">
+              {thumbImgUrl && (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumbImgUrl}
+                    alt="Document to frame"
+                    className="block max-h-[50vh] max-w-full rounded-[var(--radius)]"
+                  />
+                  <div
+                    ref={thumbLayerRef}
+                    className="absolute inset-0 touch-none"
+                    onPointerMove={onThumbPointerMove}
+                    onPointerUp={onThumbPointerUp}
+                    onPointerLeave={onThumbPointerUp}
+                  >
+                    {thumbFrame && (
+                      <div
+                        className="absolute border-2 border-primary"
+                        style={{
+                          left: `${thumbFrame.x * 100}%`,
+                          top: `${thumbFrame.y * 100}%`,
+                          width: `${thumbFrame.w * 100}%`,
+                          height: `${thumbFrame.h * 100}%`,
+                          boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)",
+                          touchAction: "none",
+                        }}
+                        onPointerDown={startThumbDrag}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Frame size</Label>
+              <span className="font-mono text-xs text-muted-foreground">
+                {Math.round(thumbSize * 100)}%
+              </span>
+            </div>
+            <Slider
+              value={[thumbSize]}
+              min={0.3}
+              max={1}
+              step={0.05}
+              onValueChange={(v) => onThumbSizeChange(v?.[0] ?? 1)}
+              disabled={thumbBusy}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <Button variant="outline" onClick={useWholePageThumb} disabled={thumbBusy}>
+              Use whole page
+            </Button>
+            <Button onClick={applyThumbFrame} disabled={thumbBusy}>
+              {thumbBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set thumbnail"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/*
         Accept lists are plain MIME types with no bare file extensions. On

@@ -27,7 +27,14 @@ export async function GET(req: NextRequest) {
 
     const where: any = { userId };
     if (q) {
-      where.name = { contains: q, mode: "insensitive" };
+      // searchText is stored lowercase and concatenates the name with every
+      // captured field value, so this matches across all vault fields. The
+      // name clause is a fallback for any legacy rows without searchText.
+      const term = q.toLowerCase();
+      where.OR = [
+        { searchText: { contains: term } },
+        { name: { contains: q, mode: "insensitive" } },
+      ];
     }
     if (folderId) {
       where.folderId = folderId;

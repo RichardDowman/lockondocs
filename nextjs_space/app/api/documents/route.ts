@@ -7,6 +7,8 @@ import { prisma } from "@/lib/db";
 import { getFileUrl } from "@/lib/s3";
 import { isAllowedUploadType, MAX_UPLOAD_BYTES } from "@/lib/validation";
 import { recordAudit, getClientIp } from "@/lib/audit";
+import { coerceFieldDefs, sanitizeMetadata, buildSearchText } from "@/lib/vault-fields";
+import { computeExpiryDate } from "@/lib/reminders";
 
 // GET: recent documents across all folders (for the home screen)
 export async function GET() {
@@ -57,6 +59,7 @@ export async function POST(req: NextRequest) {
     const cloudStoragePath = (body?.cloudStoragePath ?? "").toString();
     const mimeType = (body?.mimeType ?? "image/jpeg").toString();
     const fileSize = Number(body?.fileSize ?? 0) || 0;
+    const thumbnailPath = body?.thumbnailPath ? body.thumbnailPath.toString() : null;
 
     if (!folderId || !cloudStoragePath) {
       return NextResponse.json(
@@ -87,6 +90,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Vault not found." }, { status: 404 });
     }
 
+    // Capture the vault's tailored field values (only known keys are kept) and
+    // build the denormalized search haystack.
+    const fieldDefs = coerceFieldDefs(folder.fields);
+    const metadata = sanitizeMetadata(body?.metadata, fieldDefs);
+    const searchText = buildSearchText(name, metadata, fieldDefs);
+    const expiryDate = computeExpiryDate(metadata, fieldDefs);
+
     // Enforce storage quota authoritatively.
     const owner = await prisma.user.findUnique({
       where: { id: userId },
@@ -110,7 +120,11 @@ export async function POST(req: NextRequest) {
         cloudStoragePath,
         mimeType,
         fileSize,
+        thumbnailPath,
         isPublic: false,
+        metadata: metadata as any,
+        searchText,
+        expiryDate,
       },
     });
 

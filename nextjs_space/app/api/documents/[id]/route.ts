@@ -6,6 +6,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getFileUrl, deleteFile } from "@/lib/s3";
 import { recordAudit, getClientIp } from "@/lib/audit";
+import { coerceFieldDefs, sanitizeMetadata, buildSearchText } from "@/lib/vault-fields";
+import { computeExpiryDate } from "@/lib/reminders";
 
 export async function GET(
   _req: NextRequest,
@@ -20,7 +22,7 @@ export async function GET(
 
     const document = await prisma.document.findFirst({
       where: { id: params.id, userId },
-      include: { folder: { select: { id: true, name: true } } },
+      include: { folder: { select: { id: true, name: true, fields: true } } },
     });
     if (!document) {
       return NextResponse.json({ error: "Document not found." }, { status: 404 });
@@ -41,6 +43,11 @@ export async function GET(
         createdAt: document.createdAt,
         folderId: document?.folder?.id ?? "",
         folderName: document?.folder?.name ?? "",
+        expiryDate: document.expiryDate ? document.expiryDate.toISOString() : null,
+        // The vault's tailored field definitions plus this document's captured
+        // values, so the document screen can render and edit them.
+        fields: coerceFieldDefs(document?.folder?.fields),
+        metadata: (document.metadata as Record<string, string>) ?? {},
         url,
       },
     });
@@ -64,8 +71,9 @@ export async function PATCH(
     const body = await req.json().catch(() => ({}));
     const name = (body?.name ?? "").toString().trim();
     const targetFolderId = body?.folderId != null ? body.folderId.toString().trim() : undefined;
+    const hasMetadata = body?.metadata !== undefined;
 
-    if (!name && targetFolderId === undefined) {
+    if (!name && targetFolderId === undefined && !hasMetadata) {
       return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
     }
     if (body?.name != null && !name) {
@@ -79,10 +87,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Document not found." }, { status: 404 });
     }
 
-    const data: { name?: string; folderId?: string } = {};
+    const data: {
+      name?: string;
+      folderId?: string;
+      metadata?: any;
+      searchText?: string;
+      expiryDate?: Date | null;
+      reminderDismissedAt?: Date | null;
+      reminderSoonSentAt?: Date | null;
+      reminderExpiredSentAt?: Date | null;
+    } = {};
     if (name) data.name = name;
 
     // Moving between folders: verify target folder ownership (strict isolation).
+    let effectiveFolderId = existing.folderId;
     if (targetFolderId !== undefined && targetFolderId !== existing.folderId) {
       const target = await prisma.folder.findFirst({
         where: { id: targetFolderId, userId },
@@ -91,10 +109,39 @@ export async function PATCH(
         return NextResponse.json({ error: "Target vault not found." }, { status: 404 });
       }
       data.folderId = targetFolderId;
+      effectiveFolderId = targetFolderId;
     }
 
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 0 && !hasMetadata) {
       return NextResponse.json({ success: true });
+    }
+
+    // Recompute metadata + search text against the effective vault's fields
+    // whenever the name, vault or field values change.
+    const folder = await prisma.folder.findFirst({
+      where: { id: effectiveFolderId, userId },
+      select: { fields: true },
+    });
+    const fieldDefs = coerceFieldDefs(folder?.fields);
+    const rawMetadata = hasMetadata ? body.metadata : (existing.metadata ?? {});
+    const metadata = sanitizeMetadata(rawMetadata, fieldDefs);
+    const effectiveName = data.name ?? existing.name;
+    data.metadata = metadata as any;
+    data.searchText = buildSearchText(effectiveName, metadata, fieldDefs);
+
+    // Recompute the denormalized expiry date against the effective vault. When
+    // it changes, clear any prior dismissal so the new date resurfaces as a
+    // reminder rather than staying silently hidden.
+    const newExpiry = computeExpiryDate(metadata, fieldDefs);
+    const prevMs = existing.expiryDate ? existing.expiryDate.getTime() : null;
+    const newMs = newExpiry ? newExpiry.getTime() : null;
+    data.expiryDate = newExpiry;
+    if (prevMs !== newMs) {
+      // A changed (or renewed) expiry date resurfaces the in-app reminder and
+      // re-arms both branded emails for the new cycle.
+      data.reminderDismissedAt = null;
+      data.reminderSoonSentAt = null;
+      data.reminderExpiredSentAt = null;
     }
 
     await prisma.document.update({
@@ -140,6 +187,14 @@ export async function DELETE(
       await deleteFile(existing.cloudStoragePath);
     } catch (e) {
       // proceed with metadata delete regardless
+    }
+
+    if (existing.thumbnailPath) {
+      try {
+        await deleteFile(existing.thumbnailPath);
+      } catch (e) {
+        // best effort; the thumbnail is non-essential
+      }
     }
 
     await prisma.document.delete({ where: { id: existing.id } });

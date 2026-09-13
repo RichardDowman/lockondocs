@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { DEFAULT_FOLDERS } from "@/lib/default-folders";
+import { getDefaultFieldsFor } from "@/lib/vault-fields";
 import { validatePassword } from "@/lib/validation";
 import { createToken } from "@/lib/tokens";
 import { sendAppEmail, emailShell, emailButton, baseUrl } from "@/lib/email";
@@ -47,6 +48,8 @@ export async function POST(req: NextRequest) {
             name: f.name,
             icon: f.icon,
             isDefault: true,
+            // Seed each default vault with its tailored document fields.
+            fields: getDefaultFieldsFor(f.name) as any,
           })),
         },
       },

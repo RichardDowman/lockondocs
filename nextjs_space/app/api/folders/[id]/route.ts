@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getFileUrl, deleteFile } from "@/lib/s3";
 import { recordAudit, getClientIp } from "@/lib/audit";
+import { coerceFieldDefs } from "@/lib/vault-fields";
 
 export async function GET(
   _req: NextRequest,
@@ -37,6 +38,7 @@ export async function GET(
         mimeType: d.mimeType,
         fileSize: d.fileSize,
         createdAt: d.createdAt,
+        hasThumbnail: !!d.thumbnailPath,
         url: await getFileUrl(d.cloudStoragePath, d.mimeType, d.isPublic),
       })),
     );
@@ -47,6 +49,7 @@ export async function GET(
         name: folder.name,
         icon: folder.icon,
         isDefault: folder.isDefault,
+        fields: coerceFieldDefs(folder.fields),
       },
       documents: docsWithUrls,
     });
@@ -77,8 +80,11 @@ export async function PATCH(
     const body = await req.json().catch(() => ({}));
     const name = (body?.name ?? "").toString().trim();
     const icon = body?.icon != null ? body.icon.toString().trim() : undefined;
+    // The field builder sends a `fields` array to replace the vault's schema.
+    const hasFields = body?.fields !== undefined;
+    const fields = hasFields ? coerceFieldDefs(body.fields) : undefined;
 
-    if (!name && icon === undefined) {
+    if (!name && icon === undefined && !hasFields) {
       return NextResponse.json(
         { error: "Nothing to update." },
         { status: 400 },
@@ -87,10 +93,17 @@ export async function PATCH(
     if (name && name.length > 60) {
       return NextResponse.json({ error: "Vault name is too long." }, { status: 400 });
     }
+    if (fields && fields.length > 20) {
+      return NextResponse.json(
+        { error: "A vault can have at most 20 fields." },
+        { status: 400 },
+      );
+    }
 
-    const data: { name?: string; icon?: string } = {};
+    const data: { name?: string; icon?: string; fields?: any } = {};
     if (name) data.name = name;
     if (icon !== undefined && icon !== "") data.icon = icon;
+    if (fields !== undefined) data.fields = fields as any;
 
     const updated = await prisma.folder.update({
       where: { id: folder.id },
@@ -110,6 +123,7 @@ export async function PATCH(
         name: updated.name,
         icon: updated.icon,
         isDefault: updated.isDefault,
+        fields: coerceFieldDefs(updated.fields),
       },
     });
   } catch (err: any) {

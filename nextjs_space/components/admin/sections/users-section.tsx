@@ -1,10 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search, Download, ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { Loader2, Search, Download, ChevronLeft, ChevronRight, Eye, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -84,6 +95,64 @@ export function UsersSection({
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Multi-select for super-admin bulk delete.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // A row can be selected only if it is not a super admin (this also protects
+  // the signed-in super admin's own row, since bulk delete is super-admin only).
+  const selectableIds = useMemo(
+    () => users.filter((u) => !u.isSuperAdmin).map((u) => u.id),
+    [users],
+  );
+  const selectedCount = selected.size;
+  const allSelectableSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+
+  function toggleOne(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAll(checked: boolean) {
+    setSelected(() => (checked ? new Set(selectableIds) : new Set()));
+  }
+
+  async function deleteSelected() {
+    if (selected.size === 0) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/admin/users/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: Array.from(selected) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Could not delete the selected users.");
+        return;
+      }
+      const skippedCount = Array.isArray(data.skipped) ? data.skipped.length : 0;
+      toast.success(
+        `Deleted ${data.deleted} user${data.deleted === 1 ? "" : "s"}` +
+          (skippedCount > 0 ? `; ${skippedCount} skipped` : "") +
+          `; ${data.filesRemoved} file${data.filesRemoved === 1 ? "" : "s"} removed.`,
+      );
+      setSelected(new Set());
+      setConfirmOpen(false);
+      load();
+    } catch {
+      toast.error("Could not delete the selected users.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // Apply a dashboard drilldown prefill once.
   useEffect(() => {
     if (!prefill) return;
@@ -137,6 +206,11 @@ export function UsersSection({
     setPage(1);
   }, [debouncedQ, status, sort, range]);
 
+  // Clear any selection whenever the visible list changes.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [users]);
+
   function exportCsv() {
     const params = new URLSearchParams(queryParams);
     params.set("format", "csv");
@@ -165,9 +239,21 @@ export function UsersSection({
             {total} account{total === 1 ? "" : "s"} match your filters.
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={exportCsv}>
-          <Download className="mr-2 h-4 w-4" /> Export CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          {isSuperAdmin && selectedCount > 0 && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Delete selected ({selectedCount})
+            </Button>
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={exportCsv}>
+            <Download className="mr-2 h-4 w-4" /> Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -225,6 +311,16 @@ export function UsersSection({
             <Table>
               <TableHeader>
                 <TableRow>
+                  {isSuperAdmin && (
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={allSelectableSelected}
+                        onCheckedChange={(c) => toggleAll(!!c)}
+                        disabled={selectableIds.length === 0}
+                        aria-label="Select all users"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>User</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden md:table-cell">Role</TableHead>
@@ -237,6 +333,16 @@ export function UsersSection({
               <TableBody>
                 {users.map((u) => (
                   <TableRow key={u.id}>
+                    {isSuperAdmin && (
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.has(u.id)}
+                          onCheckedChange={(c) => toggleOne(u.id, !!c)}
+                          disabled={u.isSuperAdmin}
+                          aria-label={`Select ${u.email}`}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <div className="min-w-0">
                         <div className="truncate font-medium text-foreground">
@@ -317,6 +423,40 @@ export function UsersSection({
         onOpenChange={setDrawerOpen}
         onChanged={load}
       />
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedCount} user{selectedCount === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the selected account{selectedCount === 1 ? "" : "s"} and
+              every document and stored file belonging to {selectedCount === 1 ? "it" : "them"}.
+              This cannot be undone. Super admin accounts are protected and will be skipped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                deleteSelected();
+              }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...
+                </>
+              ) : (
+                <>Delete {selectedCount} user{selectedCount === 1 ? "" : "s"}</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

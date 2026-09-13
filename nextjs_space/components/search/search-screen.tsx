@@ -115,7 +115,7 @@ export function SearchScreen() {
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search documents by name"
+          placeholder="Search by name, type, or details"
           className="pl-9"
           autoFocus
         />

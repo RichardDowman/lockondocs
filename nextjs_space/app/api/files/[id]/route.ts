@@ -53,7 +53,7 @@ export async function GET(
 
     const doc = await prisma.document.findFirst({
       where: { id: params.id, userId },
-      select: { cloudStoragePath: true, mimeType: true, name: true },
+      select: { cloudStoragePath: true, mimeType: true, name: true, thumbnailPath: true },
     });
     if (!doc) {
       return NextResponse.json({ error: "Document not found." }, { status: 404 });
@@ -61,18 +61,25 @@ export async function GET(
 
     const inline = req.nextUrl.searchParams.get("disposition") === "inline";
 
-    const signed = await getFileUrl(doc.cloudStoragePath, doc.mimeType, false);
+    // A small preview thumbnail (always a JPEG). Falls back to the full file
+    // when a document has no stored thumbnail.
+    const wantsThumb =
+      req.nextUrl.searchParams.get("variant") === "thumb" && !!doc.thumbnailPath;
+    const servePath = wantsThumb ? (doc.thumbnailPath as string) : doc.cloudStoragePath;
+    const serveMime = wantsThumb ? "image/jpeg" : doc.mimeType;
+
+    const signed = await getFileUrl(servePath, serveMime, false);
     const upstream = await fetch(signed);
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json({ error: "Could not retrieve the document." }, { status: 502 });
     }
 
     const headers = new Headers();
-    headers.set("Content-Type", doc.mimeType || "application/octet-stream");
-    const dispositionType = inline ? "inline" : "attachment";
+    headers.set("Content-Type", serveMime || "application/octet-stream");
+    const dispositionType = inline || wantsThumb ? "inline" : "attachment";
     headers.set(
       "Content-Disposition",
-      `${dispositionType}; filename="${safeDownloadName(doc.name, doc.mimeType)}"`,
+      `${dispositionType}; filename="${safeDownloadName(doc.name, serveMime)}"`,
     );
     const len = upstream.headers.get("content-length");
     if (len) headers.set("Content-Length", len);

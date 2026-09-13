@@ -342,3 +342,224 @@
 - IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production. Until deployed, the live site keeps issuing 1 hour links. Still-undeployed builds 14 through 23 also await that deploy.
 
 <!-- REMINDER: build counter is now at 24. Past the every-5-builds cadence: developer to review build_state.md and confirm it is current. -->
+
+---
+
+## Build 25 - Phase A: per-vault document fields, custom field builder, and cross-field search
+
+**Date:** 2026-08-30
+**Type:** Feature (data model, scanning/saving, document views, search)
+
+This is Phase A of the client architecture proposal (the ten default vaults given their own tailored document fields, plus a custom field builder and search across all fields). Phase B (expiry reminders) and Phase C (masked display and re-authentication, encryption at rest, sharing, multi-person profiles) are NOT included in this build.
+
+### What changed
+
+- **Per-vault field schema.** Each vault now carries an ordered set of field definitions. A field has a stable machine key, a human label, a type (text, number, date, or choice list), and, for a choice list, its options. The ten default vaults were each given a tailored starter set (for example, Vehicle has Make, Model, VIN and a renewal date; Financial has Institution, Account type, Statement period and a review date). Custom vaults start from a generic set (document type, issuer or source, issue date, expiration or renewal date) and can be fully edited.
+- **Custom field builder.** Every vault (default and custom) has a "Manage fields" option in its menu. The developer or user can add, rename, retype, reorder-by-removal, and delete fields, and set the options for a choice list. Renaming a field keeps values already saved against it; removing a field hides its saved values but does not delete other data. A vault is capped at 20 fields.
+- **Capturing details when saving.** The scanner's save step now shows the selected vault's fields as inputs (text, number, date picker, or choice dropdown) so details are captured at the moment a document is saved.
+- **Viewing and editing details.** The document screen shows a Details panel with the vault's fields and their saved values (dates formatted for readability), plus an "Edit details" action to change them later. Moving a document to a different vault reloads the details against the destination vault's fields.
+- **Cross-field search.** Search now matches the document name and all saved field values, not just the name. Each document keeps a derived lowercase search string (name plus all field values) that the search query is matched against. The search placeholder now reads "Search by name, type, or details".
+
+### Technical notes
+
+- Schema (additive, no data loss): Folder gained `fields` (JSON), Document gained `metadata` (JSON) and `searchText` (String, nullable). Pushed with `prisma db push --skip-generate` then `prisma generate`.
+- New `lib/vault-fields.ts` holds the field types, the ten tailored default sets, the generic set, a key slugifier, and the coerce/sanitise/build-search-text helpers used by the write APIs.
+- Seeding: signup seeds each default folder with its tailored fields; creating a custom folder seeds the generic set. A one-off backfill set fields on all 40 pre-existing folders.
+- APIs: documents POST captures and sanitises metadata and stores the derived search text; documents [id] GET returns the vault's fields and the document metadata, PATCH accepts metadata and recomputes search text (also on name or vault change); folders list and [id] GET return fields; folders [id] PATCH accepts a fields array (max 20) for the builder; search matches `searchText` (contains) OR name (case-insensitive).
+- UI: scanner-screen, document-screen and folder-screen gained the field inputs, the Details panel with its edit dialog, and the Manage fields dialog respectively; search-screen placeholder updated.
+- Files changed: prisma/schema.prisma; lib/vault-fields.ts (new); app/api/signup/route.ts; app/api/folders/route.ts; app/api/folders/[id]/route.ts; app/api/documents/route.ts; app/api/documents/[id]/route.ts; app/api/search/route.ts; components/scanner/scanner-screen.tsx; components/document/document-screen.tsx; components/folder/folder-screen.tsx; components/search/search-screen.tsx.
+- Verified: type check clean; production build success; auth and session smoke tests pass; database confirms all vaults carry their tailored fields.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). Still-undeployed builds 14 through 24 also await that deploy.
+
+<!-- REMINDER: build counter is now at 25. Past the every-5-builds cadence: developer to review build_state.md and confirm it is current. -->
+
+---
+
+## Build 26 - Real preview thumbnails and no auto-trim on upload
+
+**Date:** 2026-08-30
+**Type:** Feature / refinement (scanning and saving, folder grid, file serving)
+
+Follow-up polish on Phase A, from testing feedback: uploads were being trimmed before the user had a chance to crop, landscape images were badly squeezed into the portrait grid tiles, and a saved PDF showed a generic file icon rather than a real preview.
+
+### What changed
+
+- **No initial trim on upload or capture.** The default crop now covers the whole frame, so an uploaded photo or a captured page opens showing the complete image with nothing trimmed. The user chooses their own crop if they want one; the app never trims first.
+- **Real preview thumbnails.** When a document is saved, the app now generates a small 3:4 preview image for scanned photos and for PDFs built from a scan. By default the whole page is shown, fitted onto a white background so nothing is cut off. The folder grid tiles now display this real preview instead of squeezing the full image into the tile or showing a generic icon.
+- **Optional "Set preview thumbnail".** The save step has a "Set preview thumbnail" control. It opens a framing dialog with a draggable, resizable 3:4 frame over the image, so the user can pick exactly what the tile shows (a "cover" crop). If they do not set one, the whole-page fitted preview is used.
+- **PDF previews on the grid.** A PDF created from a scan now shows its real page preview on the grid. An externally uploaded PDF has no source image to render from, so it keeps the generic PDF icon.
+
+### Technical notes
+
+- Uses the existing (previously unused) `Document.thumbnailPath` field. No schema change was needed.
+- New imaging helpers in `lib/imaging.ts`: `THUMB_ASPECT`, a `Thumbnail` type, `renderThumbnailContain` (whole-page fit on white), `renderThumbnailCover` (crop to a chosen frame), and `centeredFrame`.
+- Saving: the scanner builds the thumbnail (user's chosen frame, or the whole-page fallback), uploads it via a second presigned URL, and sends its path as `thumbnailPath` on the document create request.
+- Serving: `GET /api/files/[id]?variant=thumb` streams the thumbnail inline as a JPEG, falling back to the full file if a document has no thumbnail. The folders list marks each document with `hasThumbnail` so the grid knows whether to render an image tile.
+- Deleting a document also removes its thumbnail object from storage.
+- Thumbnails are small and are not counted against the user's storage quota. Documents saved before this build have no stored thumbnail, so they keep their previous tile appearance; only newly saved documents get the new preview.
+- Files changed: lib/imaging.ts; components/scanner/scanner-screen.tsx; components/folder/folder-screen.tsx; app/api/documents/route.ts; app/api/documents/[id]/route.ts; app/api/folders/[id]/route.ts; app/api/files/[id]/route.ts.
+- Verified: type check clean; production build success; auth and session smoke tests pass; manual browser check confirmed an uploaded landscape passport opens un-trimmed, the framing dialog sets a custom tile, the whole-page default renders, and a scan-built PDF shows a real preview tile. Test documents created during the check were removed afterwards.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). Still-undeployed builds 14 through 25 also await that deploy.
+
+---
+
+## Build 27 - Show/hide document previews on the folder grid
+
+**Date:** 2026-08-30
+**Type:** Feature (folder grid, privacy and diagnostic control)
+
+Adds a per-browser control to show or hide the document image previews on a vault's grid tiles. It doubles as a privacy option (do not render sensitive document images in the grid) and as a diagnostic aid (turn previews off, reload, and check whether a browser security warning that appears on a populated vault is being triggered by the rendered document imagery).
+
+### What changed
+
+- **Show/hide previews toggle.** A folder that contains documents now shows an eye icon in its header. Tapping it hides all document image previews on that vault's grid; tapping again shows them. When previews are off, each tile shows a neutral "Preview off" placeholder instead of the image.
+- **Remembered per browser.** The choice is stored in the browser (local storage) under `lockondocs.showPreviews`, so it survives a page reload and applies across vaults. This is what makes the diagnostic test work: turn previews off, reload the populated vault, and the images stay hidden.
+- **No image is fetched when hidden.** With previews off, the tile image element is not rendered at all, so no document image is requested or shown. This is deliberate so the setting is a genuine privacy control and a valid test of whether rendered imagery is behind a browser warning.
+
+### Technical notes
+
+- Client-only change in `components/folder/folder-screen.tsx`. No schema change, no API change.
+- New state `showPreviews` (default on), hydrated from local storage on mount, with a `togglePreviews` handler that persists the value. The header eye button only appears when the vault has at least one document.
+- Tile rendering now checks `showPreviews` first: off shows the placeholder; on keeps the existing behaviour (real thumbnail for images and scan-built PDFs, generic icon for uploaded PDFs without a thumbnail).
+- Files changed: components/folder/folder-screen.tsx.
+- Verified: type check clean; production build success; auth and session smoke tests pass; manual browser check confirmed the toggle hides and shows previews, shows the "Preview off" placeholder, and persists the hidden state across a reload. The test document used was removed afterwards.
+- Context: this was added to help diagnose a Chrome Safe Browsing "Dangerous site" warning that appears on a populated vault page but not on the home screen. The warning is a Google domain and content reputation verdict, not an app defect, and is cleared through Google (Search Console security review and the Safe Browsing incorrect-warning report), not by a code change. This toggle only helps confirm whether the rendered imagery is the trigger.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). Still-undeployed builds 14 through 26 also await that deploy. The diagnostic test itself must be run on the live host, since the Safe Browsing warning appears there.
+
+---
+
+## Build 28 - Expiry reminders (Phase B)
+
+**Date:** 2026-08-30
+**Type:** Feature (expiry tracking and reminders)
+
+Phase B adds expiry and renewal tracking. The app now reads each document's expiry or renewal date from its vault fields, tracks it, and surfaces documents that are expiring soon or have already expired. This is the in-app reminders layer. Scheduled email reminders are a separate follow-on and are not built in this build.
+
+### What changed
+
+- **Expiry is derived from the vault's date field.** Each vault already has date fields from Phase A (for example "Expiry date", "Renewal due", "Retention until"). When a document is saved or its details are edited, the app picks that vault's designated expiry field and records the document's expiry date. No new per-document date input was added; it reuses the fields the vault already has.
+- **Reminders screen.** A new Reminders screen (bell icon, top left of the home screen) lists documents that need attention, split into "Expired" and "Expiring soon". Each entry shows the document, its vault, and a plain-English label ("Expires in 12 days", "Expired 3 days ago"), and links straight to the document. A document can be dismissed from the list.
+- **Home screen entry points.** The home screen shows a bell icon with a red count badge when any documents need attention, plus a banner ("N documents need attention") that links to the Reminders screen. Both appear only when there is something to show.
+- **Document badge.** The document screen shows a coloured status badge above the Details panel: red when expired, amber when expiring soon (within the reminder lead time). Nothing is shown when the document is not near expiry or has no expiry date.
+- **Adjustable lead time.** Each user can choose how far ahead they are reminded (7, 14, 30, 60 or 90 days; default 30). The setting lives on the Reminders screen.
+
+### Technical notes
+
+- Schema (all additive, no data loss): `Document.expiryDate` (DateTime, nullable), `Document.reminderDismissedAt` (DateTime, nullable), a composite index `@@index([userId, expiryDate])`, and `User.reminderLeadDays` (Int, default 30).
+- New `lib/reminders.ts` (client-safe): expiry parsing and computation, whole-day UTC date maths, status classification (expired / soon / ok), the GB-English label helper, lead-day choices and clamping. `getExpiryFieldKey` in `lib/vault-fields.ts` chooses the vault's expiry field (prefers an explicit expiry key, then renewal or retention, then any date field whose key or label looks like an expiry).
+- Write path: the documents create and update APIs compute and store `expiryDate` from the metadata and the vault's fields, and reset the dismissed flag when the date changes so a renewed document can remind again.
+- Read path: `GET /api/reminders` returns the user's non-dismissed documents that are expired or within the lead window, ordered by soonest, with status and label. `PATCH /api/reminders` updates the lead-time setting and dismisses a document (ownership checked, recorded in the audit log as `reminder.dismiss`).
+- Strict per-user scoping throughout: every reminder query is filtered by the signed-in user's ID.
+- Existing documents were backfilled once from their saved metadata so current expiry dates show up immediately.
+- Files changed: prisma/schema.prisma; lib/reminders.ts (new); lib/vault-fields.ts; app/api/documents/route.ts; app/api/documents/[id]/route.ts; app/api/reminders/route.ts (new); app/api/user/route.ts; app/reminders/page.tsx (new); components/reminders/reminders-screen.tsx (new); components/document/document-screen.tsx; components/home/home-screen.tsx.
+- Verified: type check clean; production build success; auth and session smoke tests pass; the expiry computation, status classification, day maths, labels and lead-day clamping were unit-checked directly and pass.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). Still-undeployed builds 14 through 27 also await that deploy.
+- Build counter is now at 28. This is a review point: worth a quick read back over the recent build entries.
+
+---
+
+## Build 29 - Email expiry reminders, admin email log, bulk user delete, enforced storage encryption
+
+**Date:** 2026-08-30
+**Type:** Feature (email reminders, admin tooling, security)
+
+Build 29 turns the in-app expiry reminders from Build 28 into branded reminder emails, adds an admin log of every email the app sends, gives super admins a way to clear out test accounts in bulk, and makes server-side storage encryption an explicit app requirement rather than a bucket default.
+
+### Email expiry reminders
+
+- The app now sends branded reminder emails: for each document, one "expiring soon" email at 30 days before expiry and one "expired" email once the date has passed. Exactly one of each per expiry cycle, tracked so nothing is sent twice. This exists because the app runs inside the GoodBarber shell and cannot send phone push notifications.
+- If a document is renewed and its expiry date changes, both sent markers are cleared so the new date can warn again.
+- Users can opt out with an "Email reminders" toggle on the Reminders screen. Opted-out users, dismissed reminders, and suspended or deleted accounts are all skipped.
+- A protected endpoint, POST /api/reminders/dispatch, does the sending. It is guarded by a secret (Authorization: Bearer or x-cron-secret) and is meant to be called once a day by a scheduled task. It marks each sent flag only when the send succeeds, records every send in the email log, and writes a `reminder.emails_dispatched` audit entry with counts.
+- The daily send job runs only against the live host, so reminder emails start only after a deploy to vault.lockondocs.app.
+
+### Admin email log
+
+- A new Emails tab in the admin console lists every email the app has sent (welcome and verification, password reset, and the reminder emails), with recipient, type, subject, a short truncated preview, status, and date and time. It is searchable and filterable by type, status and date range, with CSV export, newest first.
+- Status is send-acceptance ("sent" = the mail provider accepted it; "failed" = it was rejected, with the error stored), not a mailbox delivery confirmation. True delivery confirmation would need the provider's delivery webhooks; that is noted as a possible future add-on, not built.
+- Records are written best-effort on every send path, so a logging failure never blocks the email.
+
+### Bulk user delete (super admin only)
+
+- Super admins can now multi-select accounts in the Users tab (per-row checkboxes plus select-all) and delete them in one action, to clear out test users. Deletion is permanent and removes each account with every document and stored file (original and thumbnail) belonging to it, with an `admin.user_deleted` audit entry per account.
+- Super admin rows cannot be selected, which also protects the signed-in super admin's own account. The server independently refuses to delete the caller or any super admin and reports them as skipped. A confirmation dialog is shown first. Ordinary admins do not see the feature.
+
+### Enforced storage encryption
+
+- Every uploaded object now explicitly requests server-side encryption (SSE-S3, AES-256): the upload presign sets it and the client sends the matching header, so encryption is actively required by the app rather than relying on the bucket default. Verified: a PUT without the encryption header is rejected (403) and a PUT with it succeeds. Application-level (envelope) encryption remains deferred as an accepted risk. See production.md for the precise posture.
+
+### Technical notes
+
+- Schema (all additive, no data loss; pushed with `prisma db push --skip-generate` then `prisma generate`): User.emailRemindersEnabled (Boolean, default true); Document.reminderSoonSentAt and Document.reminderExpiredSentAt (DateTime, nullable); new EmailLog model (recipient, type, subject, preview, status, error, userId, documentId, createdAt) with indexes on createdAt, userId and type.
+- lib/email.ts records every send (sent or failed with the provider error) to EmailLog best-effort, and has two new branded templates (reminderSoonEmailHtml, reminderExpiredEmailHtml). lib/reminders.ts adds the 30-day email window constant. lib/s3.ts sets ServerSideEncryption on the upload presign; the scanner client sends the matching header on both the document and thumbnail uploads.
+- New: app/api/reminders/dispatch/route.ts, app/api/admin/emails/route.ts, app/api/admin/users/bulk-delete/route.ts, components/admin/sections/emails-section.tsx. Updated: app/api/documents/[id]/route.ts (clear sent flags when expiry changes), app/api/reminders/route.ts and app/api/user/route.ts (email opt-out), components/reminders/reminders-screen.tsx (toggle), components/admin/admin-console.tsx (Emails nav), components/admin/sections/users-section.tsx (multi-select delete).
+- Verified: type check clean; production build success; auth and session smoke tests pass. The dispatch endpoint was exercised end to end against a seeded test document: unauthenticated request rejected (401), candidate correctly selected, soon email sent and its flag marked, a second run sent nothing (idempotent), and both sent and failed rows appeared in the email log with recipient, type, subject and preview. The encryption requirement was verified directly against storage (403 without the header, 200 with it). All seeded test data and test email-log rows were removed afterwards; the two pre-existing real documents were left untouched.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect in production (manual deploy only). The daily reminder scheduled task also points at the live host and only sends once deployed. Still-undeployed builds 14 through 28 also await that deploy.
+- Build counter is now at 29.
+
+## Build 30 - Reminder email 30-day boundary fix
+
+### Why
+
+- A document that had lit up the in-app notification bell for "expiring in 30 days" did not produce the branded reminder email. Diagnosed as an off-by-one boundary mismatch between the two code paths.
+- The in-app bell classes a document as "expiring soon" when it is 30 or fewer days away (a "less than or equal to" test), so the bell shows at exactly 30 days. The daily email dispatch, however, selected documents whose expiry was strictly earlier than today plus 30 days (a strict "less than" test), which excluded a document sitting exactly on the 30-day boundary. The two windows disagreed by one day at the edge.
+
+### Fix
+
+- The email dispatch now uses an inclusive 30-day window: the cut-off is moved to the start of the day after the window (today plus 31 days) and compared with a strict less-than, so a document expiring exactly 30 days from today is included while a document 31 days out is still excluded. This matches the in-app bell exactly. Only app/api/reminders/dispatch/route.ts changed; no schema or data change.
+
+### Verified
+
+- Type check and production build pass. The fixed dispatch was run against the live shared data and correctly picked up the single real document sitting exactly 30 days out ("Passport IMAGE ONLY", expiring 30 September 2026), sent its branded "expiring soon" email to the owner, recorded a "sent" row in the email log, and marked the document's soon-reminder flag so it will not be sent again. A review copy of that email was delivered to the developer at r.dowman@eazi-apps.co.uk on request.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app for the corrected daily job to run against production (manual deploy only). Still-undeployed builds 14 through 29 also await that deploy.
+- Build counter is now at 30.
+
+## Build 31 - Phase C security bundle (auto-lock, masked sensitive fields, re-authentication)
+
+Requested by Richard: continue with Phase C. Built the agreed Phase C security bundle: automatic vault locking, masked display of sensitive field values, and a password re-authentication step to reveal them. The other items once mentioned under the wider Phase C banner - document sharing, multi-person profiles, and application-level (envelope) encryption at rest - are NOT part of this build. Encryption at rest remains a deferred accepted risk (see production.md); sharing and multi-person profiles need a separate go-ahead.
+
+### Auto-lock
+
+- The vault now locks itself after a period of inactivity and re-locks whenever the app is sent to the background and reopened. This matters because the app runs inside the GoodBarber mobile shell, where a phone can be put down or switched away mid-session.
+- The lock is a full-screen overlay asking for the account password, not a sign-out: the session and its first-party cookies stay intact, so unlocking is a single password step and the GoodBarber embed keeps working.
+- The timeout is a per-user setting in Settings with choices of 1, 3, 5 or 10 minutes, or Never. The default is 5 minutes. Background-and-reopen locking applies whenever a timeout is set (it is skipped only when the user has chosen Never).
+- The chosen state is remembered on the device so a reload or a return to the tab keeps the vault locked until the password is entered.
+
+### Masked sensitive fields
+
+- On a document's Details panel, sensitive values (for example an ID or passport number, a licence number, a VIN, an account or policy number, a username, or a patient name) are now masked by default and shown as dots.
+- A single Reveal control on the Details header asks for the account password once and then shows the values; a Hide control masks them again immediately. Values are automatically re-masked if the app is sent to the background, so a shoulder-surfer or a left-open phone does not expose them.
+- Only free-text and number fields are treated as sensitive, and only where the field name matches a sensitive pattern. Non-sensitive descriptive fields (for example an account type of Current or Savings, or a service name) are never masked, so the panel stays readable.
+
+### Re-authentication
+
+- A new server endpoint verifies the signed-in user's password without affecting the login lockout counters (this is a confirmation step for an already-authenticated user, not a fresh login). It is used by both the unlock overlay and the reveal control, and it records an audit entry for each successful or failed re-authentication.
+
+### Technical notes
+
+- Schema (additive, no data loss; pushed with `prisma db push --skip-generate` then `prisma generate`): `User.autoLockMinutes` (Int, default 5).
+- New: `app/api/auth/reauth/route.ts` (password re-check, audit `auth.reauth` / `auth.reauth_failed`, never touches failed-login counters), `lib/auto-lock.ts` (default and choice constants, storage key, change event, helpers), `components/security/reauth-dialog.tsx` (reusable password-confirm dialog), `components/security/lock-provider.tsx` (idle timer, background-reopen lock, persisted lock state, unlock overlay).
+- Updated: `app/api/user/route.ts` (GET returns `autoLockMinutes`; PATCH does partial updates and validates the auto-lock choice), `components/providers.tsx` (wraps the app in the lock provider), `components/settings/settings-screen.tsx` (auto-lock chooser), `lib/vault-fields.ts` (sensitive-field detection helper), `components/document/document-screen.tsx` (masking plus reveal/hide with re-authentication).
+- Verified: type check clean; production build success; automated auth and session smoke tests pass. The re-authentication and settings endpoints were exercised directly: a re-auth call with no session is rejected (401), the correct password returns success (200), a wrong password is rejected (401) without changing the lockout counters, the auto-lock setting saves a valid choice and rejects an invalid one (400), and the account read returns the saved auto-lock value. As a new feature rather than a reported defect this was not additionally exercised in a browser; the unlock overlay, background-reopen locking and the reveal flow should be spot-checked on a device after deploy. No test data was left behind.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect (manual deploy only). Still-undeployed builds 14 through 30 also await that deploy.
+- Build counter is now at 31.
+
+---
+
+## Docs review note (2026-08-31, docs-only - counter stays at 31)
+
+A full review and refresh of the /docs set was carried out to bring every document into line with the current Build 31 state. This is a documentation-only change, so per the workflow rule it is recorded as an additive note and does not increment the numbered build counter.
+
+- production.md: the header status now reads that Phases 1 and 2 are complete and client architecture Phases A, B and C are built (Builds 25 to 31) and awaiting manual deploy; a "complete (Build 11)" note was added under the Phase 2 heading (the original planning checkboxes are retained as the plan of record); the storage-quota line was corrected to say the quota is built and enforced from Phase 2; a duplicate production-domain cutover line was removed; and the "last updated" line was set to 2026-08-31 (Build 31 review). The Access security section (auto-lock, masked fields, re-authentication) added in Build 31 is present.
+- admin.md: the header status and current-phase lines were updated to reflect the extensions through Builds 12, 20, 29 and 31, and a new Auto-lock (Build 31) subsection was added to the settings area alongside the existing security note.
+- CUSTOM_INSTRUCTIONS.md: a new "Client Architecture Phases" section was added documenting Phases A, B and C as built (with the still-open items: sharing, multi-person profiles, encryption at rest), and the Quick Reference "current phase" row was updated to match. The in-chat copy given to the developer was refreshed to the same effect.
+- files.md: a Build 30 boundary-fix note was added to the email-reminders section, and a new "Masked sensitive fields on the document screen (Build 31, Phase C)" section was added describing the reveal/hide behaviour, the sensitive-field pattern, password-confirmed reveal and auto re-mask on background.
+- scanner.md: reviewed; no change needed (the SSE-S3 upload header is already covered in production.md).
+
+All .docx and .pdf siblings were regenerated so the exported copies match the .md sources. No code, schema or data changes were made in this review, and nothing was deployed.
+
+---
+
+## Decision note (2026-08-31, docs-only - counter stays at 31)
+
+Host decision resolved by the developer: the two previous hosts, securevault.dowmandigitalservices.com and lockondocs.abacusai.app, have been RETIRED. vault.lockondocs.app is now the single live host and the only target for a manual deploy. The forward-looking docs were tidied to match: production.md (domain-migration and open-questions sections) and CUSTOM_INSTRUCTIONS.md (deploy rule) no longer list the old hosts as a pending decision, and the in-chat Custom Instructions copy was updated the same way. Historical build entries above are left unchanged (this log is append-only), so their references to the old hosts remain as a record of what was true at the time. No code, schema or data change; nothing deployed.

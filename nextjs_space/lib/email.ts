@@ -4,6 +4,7 @@
 // Best-effort: callers handle failures.
 
 import { Resend } from "resend";
+import { prisma } from "@/lib/db";
 
 interface SendArgs {
   // Retained for backwards compatibility with existing callers; unused by Resend.
@@ -11,6 +12,60 @@ interface SendArgs {
   recipientEmail: string;
   subject: string;
   html: string;
+  // Optional metadata used only to record the send in the EmailLog table so the
+  // admin Emails screen can show what was sent. None of these affect delivery.
+  logType?: string;
+  userId?: string | null;
+  documentId?: string | null;
+  preview?: string | null;
+}
+
+// Strips HTML tags and collapses whitespace to build a short plain-text preview
+// for the admin Emails log. Never throws.
+function toPreview(html: string, max = 140): string {
+  try {
+    const text = html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&middot;/g, "·")
+      .replace(/&copy;/g, "©")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  } catch {
+    return "";
+  }
+}
+
+// Best-effort write to the EmailLog table. Never throws so it cannot break a
+// send. status is "sent" when the provider accepted the message, else "failed".
+async function recordEmailLog(args: {
+  recipientEmail: string;
+  subject: string;
+  status: string;
+  logType?: string;
+  userId?: string | null;
+  documentId?: string | null;
+  preview?: string | null;
+  error?: string | null;
+}): Promise<void> {
+  try {
+    await prisma.emailLog.create({
+      data: {
+        recipientEmail: args.recipientEmail,
+        subject: args.subject,
+        status: args.status,
+        type: args.logType ?? "general",
+        userId: args.userId ?? null,
+        documentId: args.documentId ?? null,
+        preview: args.preview ?? null,
+        error: args.error ?? null,
+      },
+    });
+  } catch {
+    // Logging must never interrupt the primary send flow.
+  }
 }
 
 // e.g. "LockonDocs <noreply@lockondocs.app>". Must be on a domain verified in Resend.
@@ -21,10 +76,25 @@ export async function sendAppEmail({
   recipientEmail,
   subject,
   html,
+  logType,
+  userId,
+  documentId,
+  preview,
 }: SendArgs): Promise<boolean> {
+  const previewText = preview ?? toPreview(html);
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.error("sendAppEmail: RESEND_API_KEY is not configured.");
+    await recordEmailLog({
+      recipientEmail,
+      subject,
+      status: "failed",
+      logType,
+      userId,
+      documentId,
+      preview: previewText,
+      error: "RESEND_API_KEY is not configured",
+    });
     return false;
   }
 
@@ -38,11 +108,40 @@ export async function sendAppEmail({
     });
     if (error) {
       console.error("sendAppEmail failed:", error?.message ?? error);
+      await recordEmailLog({
+        recipientEmail,
+        subject,
+        status: "failed",
+        logType,
+        userId,
+        documentId,
+        preview: previewText,
+        error: (error as any)?.message ?? String(error),
+      });
       return false;
     }
+    await recordEmailLog({
+      recipientEmail,
+      subject,
+      status: "sent",
+      logType,
+      userId,
+      documentId,
+      preview: previewText,
+    });
     return true;
   } catch (err: any) {
     console.error("sendAppEmail error:", err?.message ?? err);
+    await recordEmailLog({
+      recipientEmail,
+      subject,
+      status: "failed",
+      logType,
+      userId,
+      documentId,
+      preview: previewText,
+      error: err?.message ?? String(err),
+    });
     return false;
   }
 }
@@ -116,4 +215,65 @@ export function emailShell(title: string, bodyInner: string): string {
       </tr>
     </table>
   </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Expiry reminder email templates (Phase B email layer).
+// Each document triggers at most one "expiring soon" email (at 30 days) and one
+// "expired" email, both fully branded via emailShell. GB English, no em dashes.
+// ---------------------------------------------------------------------------
+
+function greetingName(name?: string | null): string {
+  const n = (name ?? "").trim();
+  return n ? n.split(/\s+/)[0] : "there";
+}
+
+// Escapes user-supplied text before placing it in the HTML body.
+function esc(value: string): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+interface ReminderEmailArgs {
+  recipientName?: string | null;
+  documentName: string;
+  folderName?: string | null;
+  expiryLabel: string; // human-readable date, e.g. "12 September 2026"
+  daysRemaining: number; // whole days until expiry (>= 0 for "soon")
+  ctaUrl: string;
+}
+
+export function reminderSoonEmailHtml(args: ReminderEmailArgs): string {
+  const first = esc(greetingName(args.recipientName));
+  const doc = esc(args.documentName || "A document");
+  const folder = args.folderName ? esc(args.folderName) : "";
+  const days =
+    args.daysRemaining <= 0
+      ? "today"
+      : args.daysRemaining === 1
+        ? "in 1 day"
+        : `in ${args.daysRemaining} days`;
+  const inVault = folder ? ` in your <strong>${folder}</strong> vault` : "";
+  const body = `
+    <p style="margin:0 0 14px;">Hello ${first},</p>
+    <p style="margin:0 0 14px;">This is a friendly reminder that <strong>${doc}</strong>${inVault} is due to expire <strong>${days}</strong>, on <strong>${esc(args.expiryLabel)}</strong>.</p>
+    <p style="margin:0 0 6px;">If you have already renewed it, you can update the expiry date in the app so we stop reminding you. Otherwise, now is a good time to arrange a renewal.</p>
+    ${emailButton(args.ctaUrl, "Review in LockonDocs")}`;
+  return emailShell("A document is expiring soon", body);
+}
+
+export function reminderExpiredEmailHtml(args: ReminderEmailArgs): string {
+  const first = esc(greetingName(args.recipientName));
+  const doc = esc(args.documentName || "A document");
+  const folder = args.folderName ? esc(args.folderName) : "";
+  const inVault = folder ? ` in your <strong>${folder}</strong> vault` : "";
+  const body = `
+    <p style="margin:0 0 14px;">Hello ${first},</p>
+    <p style="margin:0 0 14px;"><strong>${doc}</strong>${inVault} expired on <strong>${esc(args.expiryLabel)}</strong>.</p>
+    <p style="margin:0 0 6px;">If you have renewed it, update the stored copy and its expiry date in the app to keep your vault current. If not, please arrange a renewal at your earliest convenience.</p>
+    ${emailButton(args.ctaUrl, "Open LockonDocs")}`;
+  return emailShell("A document has expired", body);
 }

@@ -21,6 +21,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Lock } from "lucide-react";
+import {
+  AUTO_LOCK_CHOICES,
+  AUTO_LOCK_CHANGED_EVENT,
+  DEFAULT_AUTO_LOCK_MINUTES,
+  autoLockLabel,
+} from "@/lib/auto-lock";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -37,6 +51,7 @@ interface Profile {
   storageLimit: number;
   isAdmin: boolean;
   emailVerified: boolean;
+  autoLockMinutes: number;
   folderCount: number;
   documentCount: number;
 }
@@ -61,6 +76,8 @@ export function SettingsScreen() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [autoLock, setAutoLock] = useState<number>(DEFAULT_AUTO_LOCK_MINUTES);
+  const [savingLock, setSavingLock] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -69,6 +86,9 @@ export function SettingsScreen() {
       if (res.ok) {
         setProfile(data?.user ?? null);
         setName(data?.user?.name ?? "");
+        if (typeof data?.user?.autoLockMinutes === "number") {
+          setAutoLock(data.user.autoLockMinutes);
+        }
       }
     } catch (err) {
       toast.error("Could not load your profile.");
@@ -107,6 +127,35 @@ export function SettingsScreen() {
       toast.error("Something went wrong.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function changeAutoLock(value: string) {
+    const next = Number(value);
+    const prev = autoLock;
+    setAutoLock(next);
+    setSavingLock(true);
+    try {
+      const res = await fetch("/api/user", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoLockMinutes: next }),
+      });
+      if (!res.ok) {
+        setAutoLock(prev);
+        toast.error("Could not update auto-lock.");
+        return;
+      }
+      // Tell the mounted lock provider to use the new window immediately.
+      window.dispatchEvent(
+        new CustomEvent(AUTO_LOCK_CHANGED_EVENT, { detail: { minutes: next } }),
+      );
+      toast.success("Auto-lock updated.");
+    } catch {
+      setAutoLock(prev);
+      toast.error("Something went wrong.");
+    } finally {
+      setSavingLock(false);
     }
   }
 
@@ -267,6 +316,36 @@ export function SettingsScreen() {
               </div>
             </button>
           )}
+
+          {/* Auto-lock control */}
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] bg-card p-4 shadow-sm">
+            <div className="flex min-w-0 items-start gap-3">
+              <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Auto-lock</p>
+                <p className="text-xs text-muted-foreground">
+                  Lock the vault after a period of inactivity, and when the app is
+                  reopened.
+                </p>
+              </div>
+            </div>
+            <Select
+              value={String(autoLock)}
+              onValueChange={changeAutoLock}
+              disabled={savingLock}
+            >
+              <SelectTrigger className="w-[104px] shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AUTO_LOCK_CHOICES.map((c) => (
+                  <SelectItem key={c} value={String(c)}>
+                    {autoLockLabel(c)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Security note */}
           <div className="flex items-start gap-3 rounded-[var(--radius-lg)] bg-accent/60 p-4">

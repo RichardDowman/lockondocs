@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { Plus, FileText, Loader2, FolderPlus, Search, ShieldCheck } from "lucide-react";
+import { Plus, FileText, Loader2, FolderPlus, Search, ShieldCheck, Bell, AlarmClock, ChevronRight } from "lucide-react";
 import { FolderIcon, FOLDER_ICON_CHOICES } from "@/components/app/folder-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,7 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
   const router = useRouter();
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [recent, setRecent] = useState<RecentDoc[]>([]);
+  const [reminderCount, setReminderCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -47,14 +48,17 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
 
   const load = useCallback(async () => {
     try {
-      const [fRes, dRes] = await Promise.all([
+      const [fRes, dRes, rRes] = await Promise.all([
         fetch("/api/folders"),
         fetch("/api/documents"),
+        fetch("/api/reminders"),
       ]);
       const fData = await fRes.json().catch(() => ({}));
       const dData = await dRes.json().catch(() => ({}));
+      const rData = await rRes.json().catch(() => ({}));
       setFolders(fData?.folders ?? []);
       setRecent(dData?.documents ?? []);
+      setReminderCount((rData?.items ?? []).length);
     } catch (err) {
       toast.error("Could not load your vaults.");
     } finally {
@@ -100,6 +104,19 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
   return (
     <div className="px-5 pt-8">
       <div className="relative mb-6 flex flex-col items-center pt-1">
+        <button
+          type="button"
+          onClick={() => router.push("/reminders")}
+          className="absolute left-0 top-0 flex items-center rounded-[var(--radius-full)] border border-border bg-card p-2 text-foreground shadow-sm transition-shadow hover:shadow-md active:scale-[0.97] no-select"
+          aria-label="Open expiry reminders"
+        >
+          <Bell className="h-4 w-4 text-primary" />
+          {reminderCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-full)] bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+              {reminderCount > 9 ? "9+" : reminderCount}
+            </span>
+          )}
+        </button>
         {isAdmin && (
           <button
             type="button"
@@ -127,6 +144,26 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
       <p className="mb-6 text-center text-sm text-muted-foreground">
         Welcome back{userName ? `, ${userName}` : ""}
       </p>
+
+      {/* Expiry reminders banner */}
+      {reminderCount > 0 && (
+        <button
+          type="button"
+          onClick={() => router.push("/reminders")}
+          className="mb-4 flex w-full items-center gap-3 rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left shadow-sm transition-shadow hover:shadow-md active:scale-[0.99] no-select"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] bg-amber-500/20 text-amber-600 dark:text-amber-400">
+            <AlarmClock className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-foreground">
+              {reminderCount} {reminderCount === 1 ? "document needs" : "documents need"} attention
+            </span>
+            <span className="block text-xs text-muted-foreground">Expiring soon or already expired</span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </button>
+      )}
 
       {/* Search entry */}
       <button

@@ -7,6 +7,7 @@ import {
   Users as UsersIcon,
   ShieldCheck,
   ScrollText,
+  Mail,
   DatabaseBackup,
   LogOut,
   Menu,
@@ -18,6 +19,7 @@ import { DashboardSection } from "@/components/admin/sections/dashboard-section"
 import { UsersSection } from "@/components/admin/sections/users-section";
 import { AdminManagementSection } from "@/components/admin/sections/admin-management-section";
 import { AuditSection } from "@/components/admin/sections/audit-section";
+import { EmailsSection } from "@/components/admin/sections/emails-section";
 import { BackupsSection } from "@/components/admin/sections/backups-section";
 import type { DateFilterValue } from "@/components/admin/date-filter";
 
@@ -26,6 +28,7 @@ export type AdminSection =
   | "users"
   | "adminmgmt"
   | "audit"
+  | "emails"
   | "backups";
 
 interface NavItem {
@@ -40,6 +43,7 @@ const NAV: NavItem[] = [
   { key: "users", label: "Users", icon: UsersIcon },
   { key: "adminmgmt", label: "Admin Management", icon: ShieldCheck, superOnly: true },
   { key: "audit", label: "Audit", icon: ScrollText },
+  { key: "emails", label: "Emails", icon: Mail },
   { key: "backups", label: "Backups", icon: DatabaseBackup },
 ];
 
@@ -212,6 +216,7 @@ export function AdminConsole({
           )}
           {section === "adminmgmt" && isSuperAdmin && <AdminManagementSection />}
           {section === "audit" && <AuditSection />}
+          {section === "emails" && <EmailsSection />}
           {section === "backups" && <BackupsSection />}
         </main>
       </div>

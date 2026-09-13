@@ -13,6 +13,8 @@ import {
   X,
   FolderInput,
   FileText,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { FolderIcon } from "@/components/app/folder-icon";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,25 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import type { FieldDef } from "@/lib/vault-fields";
+import { isSensitiveField } from "@/lib/vault-fields";
+import { ReauthDialog } from "@/components/security/reauth-dialog";
+import {
+  DEFAULT_REMINDER_LEAD_DAYS,
+  daysUntil,
+  reminderLabel,
+  statusFor,
+} from "@/lib/reminders";
+import { AlarmClock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface DocDetail {
   id: string;
@@ -50,6 +71,25 @@ interface DocDetail {
   folderId: string;
   folderName: string;
   url: string;
+  expiryDate: string | null;
+  fields: FieldDef[];
+  metadata: Record<string, string>;
+}
+
+function formatFieldValue(field: FieldDef, value: string): string {
+  if (!value) return "";
+  if (field.type === "date") {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-GB", {
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    }
+  }
+  return value;
 }
 
 function formatBytes(bytes: number): string {
@@ -72,6 +112,12 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [folders, setFolders] = useState<{ id: string; name: string; icon: string }[]>([]);
   const [moving, setMoving] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [metaDraft, setMetaDraft] = useState<Record<string, string>>({});
+  const [savingDetails, setSavingDetails] = useState(false);
+  // Sensitive field values stay masked until the user confirms their password.
+  const [revealed, setRevealed] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -94,6 +140,16 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Re-mask sensitive fields if the app is backgrounded, so a revealed value is
+  // never left on screen when the user switches away and returns.
+  useEffect(() => {
+    function onHide() {
+      if (document.visibilityState === "hidden") setRevealed(false);
+    }
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, []);
 
   const isPdf = doc?.mimeType === "application/pdf";
   // Preview and download both stream through the app's own domain so the
@@ -175,10 +231,49 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
       );
       setMoveOpen(false);
       toast.success("Document moved.");
+      // The destination vault may have a different set of fields, so reload to
+      // reflect the correct details for the new vault.
+      load();
     } catch (err) {
       toast.error("Something went wrong.");
     } finally {
       setMoving(false);
+    }
+  }
+
+  function openDetails() {
+    if (!doc) return;
+    setMetaDraft({ ...(doc.metadata ?? {}) });
+    setDetailsOpen(true);
+  }
+
+  async function handleSaveDetails() {
+    if (!doc) return;
+    setSavingDetails(true);
+    try {
+      const metadata: Record<string, string> = {};
+      for (const field of doc.fields ?? []) {
+        const raw = (metaDraft[field.key] ?? "").trim();
+        if (raw) metadata[field.key] = raw;
+      }
+      const res = await fetch(`/api/documents/${documentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Could not save details.");
+        setSavingDetails(false);
+        return;
+      }
+      setDoc((prev) => (prev ? { ...prev, metadata } : prev));
+      setDetailsOpen(false);
+      toast.success("Details saved.");
+    } catch (err) {
+      toast.error("Something went wrong.");
+    } finally {
+      setSavingDetails(false);
     }
   }
 
@@ -226,6 +321,11 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
               <DropdownMenuItem onClick={() => setEditing(true)}>
                 <Pencil className="mr-2 h-4 w-4" /> Rename
               </DropdownMenuItem>
+              {(doc.fields?.length ?? 0) > 0 && (
+                <DropdownMenuItem onClick={openDetails}>
+                  <FileText className="mr-2 h-4 w-4" /> Edit details
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={openMove}>
                 <FolderInput className="mr-2 h-4 w-4" /> Move to vault
               </DropdownMenuItem>
@@ -306,11 +406,165 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
             </div>
           )}
 
+          {(() => {
+            if (!doc.expiryDate) return null;
+            const d = new Date(doc.expiryDate);
+            if (isNaN(d.getTime())) return null;
+            const status = statusFor(d, DEFAULT_REMINDER_LEAD_DAYS);
+            if (status === "ok") return null;
+            const label = reminderLabel(status, daysUntil(d));
+            const expired = status === "expired";
+            return (
+              <div
+                className={cn(
+                  "mb-4 flex items-center gap-2.5 rounded-[var(--radius-lg)] px-4 py-3 text-sm font-medium",
+                  expired
+                    ? "bg-destructive/10 text-destructive"
+                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                )}
+              >
+                <AlarmClock className="h-4 w-4 shrink-0" />
+                <span>{label}</span>
+              </div>
+            );
+          })()}
+
+          {(doc.fields?.length ?? 0) > 0 && (
+            <div className="mb-4 rounded-[var(--radius-lg)] bg-card p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-sm font-semibold text-foreground">Details</h2>
+                <div className="flex items-center gap-3">
+                  {doc.fields.some(
+                    (f) => isSensitiveField(f) && (doc.metadata?.[f.key] ?? "").trim(),
+                  ) && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        revealed ? setRevealed(false) : setReauthOpen(true)
+                      }
+                      className="flex items-center gap-1 text-xs font-medium text-primary active:scale-95 no-select"
+                    >
+                      {revealed ? (
+                        <>
+                          <EyeOff className="h-3.5 w-3.5" /> Hide
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="h-3.5 w-3.5" /> Reveal
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={openDetails}
+                    className="flex items-center gap-1 text-xs font-medium text-primary active:scale-95 no-select"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </button>
+                </div>
+              </div>
+              {doc.fields.some((f) => (doc.metadata?.[f.key] ?? "").trim()) ? (
+                <dl className="space-y-2.5">
+                  {doc.fields
+                    .filter((f) => (doc.metadata?.[f.key] ?? "").trim())
+                    .map((f) => {
+                      const sensitive = isSensitiveField(f);
+                      const masked = sensitive && !revealed;
+                      return (
+                        <div key={f.key} className="flex items-start justify-between gap-3">
+                          <dt className="text-sm text-muted-foreground">{f.label}</dt>
+                          <dd
+                            className={cn(
+                              "text-right text-sm font-medium text-foreground",
+                              masked && "font-mono tracking-widest text-muted-foreground",
+                            )}
+                          >
+                            {masked
+                              ? "••••••••"
+                              : formatFieldValue(f, doc.metadata[f.key])}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                </dl>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No details added yet. Tap Edit to fill them in.
+                </p>
+              )}
+            </div>
+          )}
+
           <Button className="w-full" size="lg" variant="outline" onClick={handleDownload}>
             <Download className="mr-2 h-5 w-5" /> {isPdf ? "Download PDF" : "Download"}
           </Button>
         </>
       )}
+
+      <ReauthDialog
+        open={reauthOpen}
+        onOpenChange={setReauthOpen}
+        onSuccess={() => setRevealed(true)}
+      />
+
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="max-w-[340px] rounded-[var(--radius-lg)]">
+          <DialogHeader>
+            <DialogTitle className="font-display">Edit details</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+            {(doc?.fields ?? []).map((field) => (
+              <div key={field.key} className="space-y-1.5">
+                <Label>{field.label}</Label>
+                {field.type === "select" ? (
+                  <Select
+                    value={metaDraft[field.key] ?? ""}
+                    onValueChange={(v) => setMetaDraft((prev) => ({ ...prev, [field.key]: v }))}
+                    disabled={savingDetails}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={`Choose ${field.label.toLowerCase()}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(field.options ?? []).map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    type={
+                      field.type === "number" ? "number" : field.type === "date" ? "date" : "text"
+                    }
+                    value={metaDraft[field.key] ?? ""}
+                    onChange={(e) =>
+                      setMetaDraft((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    placeholder={field.type === "text" ? field.label : undefined}
+                    disabled={savingDetails}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setDetailsOpen(false)}
+              disabled={savingDetails}
+            >
+              Cancel
+            </Button>
+            <Button className="flex-1" onClick={handleSaveDetails} disabled={savingDetails}>
+              {savingDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
         <DialogContent className="max-w-[340px] rounded-[var(--radius-lg)]">

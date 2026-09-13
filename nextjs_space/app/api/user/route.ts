@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import {
+  AUTO_LOCK_CHOICES,
+  DEFAULT_AUTO_LOCK_MINUTES,
+} from "@/lib/auto-lock";
 
 export async function GET() {
   try {
@@ -23,6 +27,9 @@ export async function GET() {
         storageLimit: true,
         isAdmin: true,
         emailVerified: true,
+        reminderLeadDays: true,
+        emailRemindersEnabled: true,
+        autoLockMinutes: true,
         createdAt: true,
       },
     });
@@ -43,6 +50,9 @@ export async function GET() {
         storageLimit: Number(user.storageLimit ?? BigInt(0)),
         isAdmin: !!user.isAdmin,
         emailVerified: !!user.emailVerified,
+        reminderLeadDays: user.reminderLeadDays ?? 30,
+        emailRemindersEnabled: user.emailRemindersEnabled ?? true,
+        autoLockMinutes: user.autoLockMinutes ?? DEFAULT_AUTO_LOCK_MINUTES,
         folderCount,
         documentCount,
       },
@@ -61,11 +71,33 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));
-    const name = (body?.name ?? "").toString().trim();
-    if (!name) {
-      return NextResponse.json({ error: "Name is required." }, { status: 400 });
+    const data: { name?: string; autoLockMinutes?: number } = {};
+
+    // Name is optional now so the same endpoint can update auto-lock alone.
+    if (body?.name !== undefined) {
+      const name = (body.name ?? "").toString().trim();
+      if (!name) {
+        return NextResponse.json({ error: "Name is required." }, { status: 400 });
+      }
+      data.name = name;
     }
-    await prisma.user.update({ where: { id: userId }, data: { name } });
+
+    if (body?.autoLockMinutes !== undefined) {
+      const minutes = Number(body.autoLockMinutes);
+      if (!AUTO_LOCK_CHOICES.includes(minutes)) {
+        return NextResponse.json(
+          { error: "Invalid auto-lock value." },
+          { status: 400 },
+        );
+      }
+      data.autoLockMinutes = minutes;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+    }
+
+    await prisma.user.update({ where: { id: userId }, data });
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error("User PATCH error:", err?.message ?? err);

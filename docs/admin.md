@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Feature name | Admin and Settings |
-| Status | Phase 2 complete |
-| Phase | Phase 2 |
+| Status | Phase 2 complete; extended through Builds 12, 20, 29 and 31 |
+| Phase | Phase 2, plus client architecture phases |
 | Priority | Medium |
 
 ## Description
@@ -37,6 +37,14 @@ Two related areas: a per-user Settings screen, and a full Admin console for priv
 
 - The Settings security note states that documents are stored securely with per-user isolation and time-limited signed access. Build 13 simplified the wording to "Your documents are private and stored securely. Only you can view them." (the "US-based infrastructure" phrase was dropped from the UI copy). It does not claim encryption at rest, which is deferred as an accepted risk (see production.md).
 
+### Auto-lock (Build 31)
+
+- Settings has an Auto-lock chooser: the vault locks itself after a period of inactivity and re-locks whenever the app is sent to the background and reopened. This matters because the app runs inside the GoodBarber mobile shell where a phone can be put down mid-session.
+- The timeout is a per-user setting with choices of 1, 3, 5 or 10 minutes, or Never, defaulting to 5 minutes. Background-and-reopen locking applies whenever a timeout is set (it is skipped only for Never).
+- The lock is a full-screen password overlay, not a sign-out, so the session and its first-party cookies survive and unlocking is a single password step. The locked state is remembered on the device so a reload keeps the vault locked until the password is entered.
+- Unlocking uses the same re-authentication step as the masked-field reveal (see files.md): a dedicated endpoint re-checks the signed-in user's password. It deliberately does not affect the login lockout counters, since it confirms an already-signed-in user, and it records an audit entry for each success or failure.
+- Not built in this bundle and still open (separate go-ahead needed): document sharing, multi-person profiles, and application-level encryption at rest (a deferred accepted risk).
+
 ## Admin Console (Phase 2, implemented; upgraded Build 12)
 
 The original two-tab admin panel was replaced by a full-screen Admin console at `/admin`. Admins reach it from a top-right "Admin" button on the home header (and the existing Settings entry). The console renders full width on desktop (not the phone-width app frame) with a persistent left sidebar; on smaller screens the sidebar collapses into a slide-over menu. An "Exit to app" control returns the admin to the normal app view.
@@ -60,6 +68,7 @@ The original two-tab admin panel was replaced by a full-screen Admin console at 
 - Searchable, sortable, paginated list of accounts (search by name or email; filter by all/admins/locked/suspended/deleted; sort by joined date, name or storage). CSV export respects the active filters.
 - Each row has a "View" button that opens a user drawer showing the account summary and recent activity, with security actions: adjust storage limit, unlock, suspend or reinstate, and send a password reset link. Super admins cannot be suspended and an admin cannot suspend their own account.
 - Deliberately no capability for an admin to open or browse another user's documents: per-user isolation is preserved.
+- **Multi-select delete (super admin only, Build 29).** Super admins see a checkbox on each row and a select-all checkbox in the header, plus a "Delete selected (N)" button. This is for clearing out test accounts in bulk. Deleting is permanent: it removes each selected account together with every document and every stored file (original and thumbnail) belonging to it, and records an `admin.user_deleted` audit entry per account before deletion. Super admin rows cannot be selected (their checkboxes are disabled), which also protects the signed-in super admin's own account; the server independently refuses to delete the caller or any super admin and reports them as skipped. A confirmation dialog is shown before anything is deleted. The whole feature is hidden for ordinary admins.
 
 ### Admin Management (super admin only)
 
@@ -69,6 +78,13 @@ The original two-tab admin panel was replaced by a full-screen Admin console at 
 ### Audit
 
 - Full audit log with action filter, free-text search (detail or user email) and date range, plus CSV export.
+
+### Emails (Build 29)
+
+- A log of the emails the app has sent: welcome and verification mails, password reset links, and the branded expiry reminder emails. Each row shows the recipient, the type, the subject, a short truncated preview of the body, the send status, and the date and time.
+- Filterable by free-text search (recipient or subject), by type, by status, and by date range, with CSV export that respects the active filters. Newest first, paginated.
+- **Status meaning:** "sent" means the mail provider accepted the message for delivery; "failed" means the provider rejected it (the error is recorded and shown). This is send-acceptance, not a mailbox delivery confirmation. Confirming actual inbox delivery (delivered, opened, bounced) would require wiring up the mail provider's delivery webhooks, which is a possible future add-on and is noted, not built.
+- Visible to all admins (not restricted to super admins). Records are written best-effort by the email helper on every send path, so a logging failure never blocks the email itself.
 
 ### Backups (rebuilt in Build 20)
 

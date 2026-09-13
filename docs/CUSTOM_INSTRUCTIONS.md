@@ -24,7 +24,7 @@
    - `build_state.md`
    - The relevant feature doc for the task (e.g. `scanner.md`, `files.md`, `admin.md`, `production.md`)
 
-2. **NEVER auto-deploy.** Always checkpoint and wait for explicit manual deploy instruction from the developer. As of Build 20 the service was migrated to the new primary host vault.lockondocs.app; deploy there. The previous hosts (securevault.dowmandigitalservices.com and lockondocs.abacusai.app) are pending a retire-or-keep decision from the developer - until confirmed, check with the developer which hosts a deploy should update.
+2. **NEVER auto-deploy.** Always checkpoint and wait for an explicit manual deploy instruction from the developer. vault.lockondocs.app is the single live host and the only deploy target. The previous hosts (securevault.dowmandigitalservices.com and lockondocs.abacusai.app) were retired on 2026-08-31.
 
 3. **Documentation format:** Always `.md` unless otherwise instructed.
 
@@ -36,7 +36,7 @@
 
 ### Build Tracking
 
-- **Build counter:** Track all builds in `build_state.md`. Current counter: 20.
+- **Build counter:** Track all builds in `build_state.md`. Current counter: 31.
 - **Prompt the user** to review/update `build_state.md` every 5 build updates.
 - `build_state.md` is **always additive** - never remove entries, only append new ones.
 
@@ -93,6 +93,20 @@ Additional feature docs will be added as the project grows.
 ### Phase 4 - Launch Prep (optional)
 - Performance optimisation, final security audit, user acceptance testing, production deployment.
 
+## Client Architecture Phases (Digital Vault Architecture document)
+
+These are the tiers from Tracey's Digital Vault Architecture brief, tracked separately from the delivery phases above. All three are built (Builds 25 to 31) and awaiting manual deploy.
+
+### Phase A - Structured vault fields (built, Build 25)
+- Per-vault metadata fields, a custom field builder, and cross-field search so users can store and find structured details (for example an ID number or policy number) alongside each document.
+
+### Phase B - Expiry reminders (built, Builds 28 to 30)
+- In-app expiry reminders (bell/badge), plus two branded reminder emails per expiry cycle: one "expiring soon" (within 30 days) and one "expired". No push notifications, because the app runs embedded in the GoodBarber shell. A per-user opt-out toggle and an admin email log are included. Build 30 fixed a 30-day boundary so a document exactly 30 days out is included.
+
+### Phase C - Access security (built, Build 31)
+- Auto-lock (choices 1, 3, 5, 10 minutes or Never; default 5) that also locks when the app is backgrounded and reopened, masked sensitive field values that require a password reveal, and a re-authentication endpoint. The lock is an in-app overlay, not a sign-out, so the GoodBarber session survives.
+- Still open (need a separate go-ahead): document sharing, multi-person profiles, encryption at rest (accepted risk, not built).
+
 ## Key Contacts
 
 - **Tracey** (YoWAD Tech, USA) - Client, product owner
@@ -110,5 +124,5 @@ Additional feature docs will be added as the project grows.
 | Docs format | .md |
 | Currency | GBP (USD at ~1.27) |
 | Data sensitivity | High (PII, medical, school) |
-| Build counter | 20 |
-| Current phase | Phase 2 complete; Phase 3 next |
+| Build counter | 31 |
+| Current phase | Phases 1 and 2 complete; client Phases A, B and C built (Builds 25 to 31); Phase 3 (GoodBarber) next |
