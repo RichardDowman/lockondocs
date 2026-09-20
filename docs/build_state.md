@@ -563,3 +563,186 @@ All .docx and .pdf siblings were regenerated so the exported copies match the .m
 ## Decision note (2026-08-31, docs-only - counter stays at 31)
 
 Host decision resolved by the developer: the two previous hosts, securevault.dowmandigitalservices.com and lockondocs.abacusai.app, have been RETIRED. vault.lockondocs.app is now the single live host and the only target for a manual deploy. The forward-looking docs were tidied to match: production.md (domain-migration and open-questions sections) and CUSTOM_INSTRUCTIONS.md (deploy rule) no longer list the old hosts as a pending decision, and the in-chat Custom Instructions copy was updated the same way. Historical build entries above are left unchanged (this log is append-only), so their references to the old hosts remain as a record of what was true at the time. No code, schema or data change; nothing deployed.
+
+---
+
+## Build 32 - On-device document intelligence for the web scanner (edge detection, auto-capture, perspective correction)
+
+Following the developer's go-ahead to "make the upgrades to the web scanner we have built - option 1", the existing browser-based scanner was upgraded with on-device (in-browser) computer vision. This keeps the web-portal-in-GoodBarber architecture: no native SDK (no ML Kit or VisionKit), no third-party scanning service, and no per-scan fees. Going native remains a separate future decision.
+
+### What was added
+
+- Live edge detection: while the camera is open, a lightweight loop finds the document in the feed and draws its outline over the video. The outline turns to the accent colour once the whole document is well framed, and a hint pill guides the user.
+- Auto-capture: when the framing is held steady and good for a few consecutive frames, the scanner captures on its own. The manual shutter is always available.
+- Auto-detect toggle on the camera bar (on by default). Turning it off falls back to a plain manual shutter with the original static framing guide.
+- Perspective correction (deskew): the captured document is warped to a flat, straight-on rectangle, so a photo taken at an angle comes out square. The review screen shows an "Edges detected and straightened" badge with a one-tap "Use original" to revert.
+- Uploaded and gallery photos are straightened too: an existing snapshot of a document is run through the same correction on import, with the same "Use original" undo.
+- Graceful fallback: if the CV runtime cannot load (for example blocked or slow inside the in-app browser), the loader times out quietly, the overlay does not appear, and all existing manual tools (capture, crop, rotate, brightness, contrast) plus the multi-page and PDF flows still work unchanged.
+
+### Technical notes
+
+- New helper `lib/doc-scan.ts`: lazily injects OpenCV.js (WASM) and jscanify from pinned CDN URLs, waits for the runtime to initialise, and exposes `detectCorners`, `cornersAreGood` and `correctCanvasToDataUrl`. All best-effort and non-throwing; OpenCV Mats are freed after use.
+- No new npm dependency and no added weight to the core bundle: the CV runtime is fetched at runtime only when the scanner is used and only if reachable.
+- Updated `components/scanner/scanner-screen.tsx`: a throttled detection loop on a small downscaled canvas drives the overlay and auto-capture; the capture and photo-import paths apply the perspective correction; new "Auto" toggle and "Use original" control; small-canvas to on-screen coordinate mapping honours the video's object-cover fit.
+- No schema, data or package.json change.
+- Verified: type check clean (tsc exit 0); the compiled app builds (the /scan route included); automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing is the known test-harness smoke-signup artifact (Build 22) and not a code issue. As a new feature rather than a reported defect, and because in-browser CV performance is device- and webview-dependent, the live overlay, auto-capture and deskew should be spot-checked on a real device in the GoodBarber in-app browser after deploy.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect (manual deploy only). Still-undeployed builds 14 through 31 also await that deploy.
+- Build counter is now at 32.
+
+---
+
+## Build 33 - Scanner detection accuracy and auto-capture timing fix
+
+The developer reported that the Build 32 scanner was unusable in practice: opening it produced an outline that jumped wildly between arbitrary shapes and it grabbed an image of whatever was in front of the camera within about a second, instead of waiting until it had genuinely found a document. This build fixes both halves of that.
+
+### Root cause
+
+The computer-vision helper used the scanning library's "find the paper" call, which returns the largest edge blob in the frame and then derives four extreme points from it. There is no check anywhere in that path that the shape is actually a rectangle, so a desk, a hand, a shadow or the frame border was handed back as a valid document. Three further factors compounded it: the acceptance test allowed a shape covering up to 98 percent of the frame (so the frame border itself qualified), opposite sides only had to be roughly half-similar, and the dwell before an automatic capture was five detections at 220 ms, about 1.1 seconds from the instant the camera opened, with no settle-in period.
+
+### What changed
+
+- Detection now validates the shape itself instead of trusting the library. The traced outline must simplify to a convex four-sided shape at a tight tolerance, because paper has straight edges and folds into four corners almost immediately. The looser tolerance passes, which are where rounded and ragged shapes collapse into a false quadrilateral, were removed.
+- The candidate must then behave like a sheet of paper: cover between 22 and 90 percent of the frame, keep every corner clear of the frame edge, have opposite sides and diagonals of similar length, have all four corner angles between 62 and 118 degrees, sit within a sensible width-to-height range, and fill its own four-cornered outline.
+- Capture timing moved into a dedicated gate: a 1.2 second warm-up after the camera opens during which nothing can fire (the outline still draws, so the user can see it working), then the document must be held steady for a further 1.4 seconds across at least 6 detections. The earliest possible automatic capture is about 2.6 seconds, against roughly 1.1 seconds before, and only for something that has stayed put.
+- Steadiness is measured both frame to frame and as total drift from where the document was first seen, so a slow pan resets the countdown rather than sliding into a capture. A detection that flickers in and out also resets.
+- The hint pill now shows a progress bar that fills over the hold, so an automatic capture is visible in advance rather than a surprise. The outline is eased between frames so it settles onto the document instead of flicking about.
+
+### Technical notes
+
+- `lib/doc-scan.ts`: `detectCorners` no longer uses the library's corner-point helper; it validates the contour with a tight approximation sweep, a convexity test, a solidity band and consistent corner ordering. `cornersAreGood` was rewritten with the geometry tests above. New `cornersDrift` and `blendCorners` helpers support the steadiness check and overlay smoothing. All tuning values live in one labelled block at the top of the file.
+- New `lib/doc-scan-gate.ts`: a small pure state machine holding the warm-up, hold and drift rules, kept out of the React code so the timing is directly testable.
+- `components/scanner/scanner-screen.tsx`: the detection loop feeds the gate and captures only when the gate allows it, and reports hold progress to the hint pill.
+- No schema, data or package dependency change. The manual shutter, the Auto toggle, the crop, rotate and brightness tools, the deskew, the "Use original" undo and the multi-page and PDF flows are all unchanged.
+
+### Verification
+
+- Gate logic: 12 of 12 simulated scenarios pass, including a full-frame shape never capturing, 30 sessions of random shapes producing no capture at all, a genuine steady document capturing at 2.6 seconds, a late-arriving document waiting the full hold, a moving document and a flickering detection never capturing, and slivers, rhombuses and edge-touching shapes being rejected.
+- Detection: the shipped module was compiled and run through the real computer-vision runtime against 8 camera-style frames, passing all 8. Two real documents are still detected; a cluttered desk, a plain wall, a large irregular pale blob, an evenly lit bright frame, a keyboard and a document running off the frame edge are all rejected. The blob and the cut-off document both passed under the old logic, which is exactly the reported behaviour.
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Not verified on hardware: the live camera behaviour still needs a spot-check on a real device in the in-app browser after deploy, since webview performance is device-dependent.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds 14 through 32 also await that deploy.
+- Build counter is now at 33. This is two builds short of the next 5-build review point at Build 35.
+
+---
+
+## Build 34 - Android outline stability, sign-in lock screen fix, capture confirmation
+
+Three issues reported from device testing of Build 33, all fixed in this build.
+
+### 1. The live outline jumps between shapes on Android
+
+The automatic grabber worked well on iOS Safari but on a Samsung phone (Samsung Browser, the engine behind the GoodBarber in-app browser on that device) the outline flicked between arbitrary shapes as the camera hunted.
+
+The Build 33 capture rules were not at fault and were left alone: the screenshots show the app correctly refusing those shapes, with the hint reading "Line up the whole document" and no capture taken. The fault was that every candidate shape the detector produced was still drawn on screen, pass or fail. Android camera feeds are noisier and hunt their exposure more, so many more junk candidates appear per second than on iOS and the overlay looked chaotic even though the logic beneath it was behaving correctly.
+
+The outline is now only painted when it is worth showing: either the shape passes the full quality test, or the same shape has been seen in roughly the same place for three consecutive detections. One-off junk is never drawn. When a real document momentarily drops out of detection the last good outline is held for half a second rather than blinking off.
+
+### 2. The vault lock screen appears immediately after signing in
+
+Signing in went past the login screen and straight onto "Vault locked", asking for the password a second time. Two causes, both fixed:
+
+- The remembered locked state was written to the device when the vault locked but was never cleared while there was no signed-in user. The moment a new sign-in completed, that leftover flag was restored and the lock screen appeared. The flag is now cleared whenever the app sees no signed-in user, so a fresh sign-in can never inherit a previous session's lock.
+- Backgrounding locked the vault instantly on return, however brief the absence had been. The navigation that follows a sign-in registers as a momentary background on some Android browsers, which locked the vault on the way in. Backgrounding is now timed: the app records when it was hidden and only locks on return once the user's chosen timeout has actually elapsed.
+
+This is a deliberate behaviour change from Build 31, which locked on any return from the background. A quick app switch no longer locks; the chosen period (1, 3, 5 or 10 minutes, or Never) now governs both idle time and background time. Locking instantly on background can be restored on request.
+
+### 3. No sense that an automatic scan has been taken
+
+On iOS the automatic capture was instant and silent, moving the user to the naming fields with nothing to mark that a scan had happened. A capture confirmation was added for both automatic and manual captures: the frame freezes, a white shutter flash fades out, and a tick with "Scan captured" and "Preparing your document..." holds for about nine tenths of a second before the details step opens. Straightening runs behind that confirmation, so in practice it costs no extra time.
+
+### Technical notes
+
+- `components/scanner/scanner-screen.tsx`: new draw gate in the detection loop (three agreeing frames, measured with the existing `cornersDrift` helper, before an unvalidated shape is drawn) plus a 500 ms grace hold on a missed detection; new capture confirmation overlay with a 900 ms hold and a fading shutter flash.
+- `components/security/lock-provider.tsx` and `lib/auto-lock.ts`: the remembered lock is cleared whenever there is no signed-in user; the time the app was hidden is recorded (in memory and on the device, so it survives the app being closed) and compared against the chosen timeout on return.
+- `lib/doc-scan.ts` and `lib/doc-scan-gate.ts` are unchanged, so the Build 33 detection and gate test results still stand. No schema, data or package dependency change.
+
+### Verification
+
+- Auto-lock, exercised in a real browser against the running app: a fresh sign-in lands on the home screen with no lock screen and no leftover lock flag; going to the background records a timestamp; returning after 20 seconds clears it without locking; returning after a simulated 10 minutes against a 5 minute setting locks as intended; a session with no background record does not lock.
+- Scanner, exercised in a real browser against a synthetic camera feed with auto-detect on: a deliberately busy, constantly changing scene produced no outline at all across 70 samples over 14 seconds and no false capture, while a steady document was outlined, auto-captured after 1.7 seconds and straightened. The capture confirmation appeared 111 ms after the shutter and held 854 ms before the details step opened.
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Not verified on hardware: the Android outline fix targets Samsung Browser, which cannot be run from the build environment. It needs a spot-check on the reporting device after deploy, along with the capture confirmation on iOS.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds 14 through 33 also await that deploy.
+- Build counter is now at 34. The next 5-build review point is the next build, Build 35.
+
+## Build 35 (2026-09-14)
+
+### Summary
+
+Two fixes to the document scanner review screen (the details step shown after a capture), both reported from Android testing.
+
+1. After a capture, the review screen shows the auto-cropped (perspective-corrected) image with a "Use original" button. Once "Use original" had been used there was no way back to the auto-cropped version. The review screen now toggles both ways: "Use original" shows the untouched photo with the badge "Showing the original photo" and a "Use auto-cropped" button that switches straight back to the straightened scan. Both versions are kept in memory, so nothing is lost either way.
+2. Bug: after choosing "Use original", going back, and rescanning, the review screen showed the previous original instead of the newest auto-cropped scan. Both stored versions are now cleared on every exit from the review screen (retake, back to the chooser, applying a manual crop, and starting a PDF review), so a fresh scan always starts on its own newest auto-cropped image.
+
+### Technical notes
+
+- `components/scanner/scanner-screen.tsx` only. `lib/doc-scan.ts`, `lib/doc-scan-gate.ts`, `lib/auto-lock.ts` and `components/security/lock-provider.tsx` are unchanged, so the Build 33 detection and gate test results and the Build 34 auto-lock behaviour still stand. No schema, data or package dependency change.
+- The corrected and original images are held in two refs; a `setVersions` helper stores both and marks whether a straightened version exists, and a `showingOriginal` flag tracks which one is on screen. `loadSourceFromDataUrl` is now purely a display call, so switching views never mutates the stored versions. `useOriginalImage` and `useCorrectedImage` only change which stored version is shown; `resetWorking` (retake and back), `applyCrop` and the PDF review path clear both refs.
+
+### Verification
+
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Exercised in a real browser at phone width (390 px) against a synthetic camera feed: after an auto-capture the badge read "Edges detected and straightened" with "Use original"; tapping it showed "Showing the original photo" with "Use auto-cropped"; tapping that returned to the straightened scan. After switching to the original then using Retake and rescanning, the new scan showed the auto-cropped version, not the previous original.
+- Not verified on hardware: should be spot-checked on the reporting device after deploy.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds 14 through 34 also await that deploy.
+- Build counter is now at 35. This is a scheduled 5-build review point: please review and, if needed, update build_state.md.
+
+## Build 36 (2026-09-16)
+
+### Summary
+
+Two scanner issues reported after Build 35 went live, plus a diagnostics aid for the one that cannot be reproduced from the build environment.
+
+1. The viewfinder opened with a square white box that did not feel document shaped, and in automatic mode a fixed frame is misleading because the app is looking for the document, not asking the user to line it up inside a box. With auto-detect on there is now no box at all: four gold corner brackets set at document proportions breathe gently and a soft line sweeps down the frame, and both disappear the instant real edges are found and the gold outline takes over. With auto-detect off there is now a document-shaped frame (A4 proportions) instead of the square one. The guide also no longer appears during the brief moment while the camera is opening.
+2. On iOS the scanner found a document, said "hold steady", then kept dropping out and starting again, while Android held fine. The hold is now forgiving rather than all-or-nothing: a single unusable frame costs one earned frame instead of resetting the hold to zero, and up to three consecutive misses are tolerated before the hold is genuinely abandoned. The stale window (how long a gap is allowed before the hold is dropped) went from 0.7 to 0.9 seconds to suit a slower detection cadence, per-frame steadiness went from 3 to 4.5 per cent of the frame diagonal, and steadiness is now measured against a smoothed reference so detector jitter is not read as hand movement.
+3. Feedback while holding is clearer. The progress bar now gives ground on a missed frame instead of freezing, so a struggling hold looks like a struggling hold, and after three broken holds inside eight seconds the hint changes to "Hold still, or tap the shutter to capture".
+4. A diagnostics overlay is available on request by adding `?debug=1` to the scan URL. It reports the video and detection canvas sizes, detections per second, average detection time, the percentage of frames in which a document was found, earned frames out of six, per-frame and total drift, the gate's current reason, and the number of broken holds. It is intended to be photographed on the reporting iPhone so the iOS behaviour can be measured rather than guessed at.
+
+The requirement that a document must genuinely be detected before an automatic capture is unchanged. A capture still needs the full warm-up, the full 1.4 second hold and six earned detections.
+
+### Technical notes
+
+- `lib/doc-scan-gate.ts`: the miss path no longer resets the hold outright. A miss increments a miss counter and hands back one earned frame; a full reset happens only when there is no anchor, when more than three consecutive misses occur, or when the gap exceeds the stale window. Tolerances moved to 4.5 per cent per frame and 6 per cent cumulative, the stale window to 900 ms, and the reference used for drift is now a smoothed (exponentially blended) version of the last accepted corners rather than the raw last frame. The feedback object now also carries the gate's reason, whether a hold was just broken, earned frames, held time and both drift figures, which is what the diagnostics overlay displays.
+- Cumulative drift was loosened only from 5 to 6 per cent, not the 9 per cent originally floated. At 9 per cent a slowly panning document (about 8 px per frame) would still reach six frames and capture, which would weaken genuine detection. At 6 per cent the streak breaks at one second, before the 1.4 second hold completes, and the "moving document does not capture" test still fails the capture as it should.
+- `components/scanner/scanner-screen.tsx`: the static square guide is replaced by two blocks, a document-shaped manual frame when auto-detect is off and the animated searching indicator when auto-detect is on and no outline exists yet; both are gated on the camera stage. The hint pill gained the struggle message and now shows the progress bar whenever there is progress rather than only when the outline is judged good. On a missed frame inside the grace window the overlay keeps its outline and wording but takes the decayed progress value, which is what makes the bar drain. A debug flag is read once from the URL and a 500 ms interval publishes the diagnostics figures while the camera is open.
+- `app/globals.css`: two scanner animations (a breathing opacity for the corner brackets and a downward sweep for the scan line), both disabled under reduced-motion preferences.
+- `lib/doc-scan.ts` (the detector itself), `lib/auto-lock.ts` and `components/security/lock-provider.tsx` are unchanged, so the Build 33 detection results and the Build 34 auto-lock behaviour still stand, and Android detection behaviour should be unaffected. No schema, data or package dependency change.
+
+### Verification
+
+- Gate unit test: 15 of 15 checks pass, including two new cases. "Occasional blip still captures" (a feed that loses detection intermittently) now captures at 2.8 seconds, and "a real loss restarts the hold" confirms a genuine loss still forces a fresh hold. The existing guards all still fail the capture as intended: flickering detection, a moving document, a full-frame shape and 30 frames of random shapes (0 captures).
+- Exercised in a real browser at phone width (390 px) against a synthetic camera feed, four runs. With auto-detect on and nothing in view: four brackets and the sweep line present, no white frame, hint "Searching for document edges...". With auto-detect off: no brackets, one document-shaped white frame. Introducing a document: first outline at 200 ms with the brackets and sweep gone in the same frame, and an automatic capture at 2.1 seconds. A feed that blanked detection for about 130 ms every 700 ms (the iOS symptom) still auto-captured at 1.7 seconds. A feed that showed the document for 900 ms then removed it for 1100 ms repeatedly produced the "Hold still, or tap the shutter to capture" hint at 5.7 seconds and, correctly, no capture. The progress bar was observed draining: 15, 30, 33, 50, 67, 50, 67, 83, 67, 83 per cent, then capture.
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Not verified on hardware: real iPhone and real Samsung Browser devices cannot be run from the build environment. The iOS fix in particular needs a spot-check on the reporting device after deploy, and the `?debug=1` panel exists precisely so the iPhone figures can be read rather than inferred.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds 14 through 36 also await that deploy.
+- Build counter is now at 36. The next 5-build review point is Build 40.
+
+## Build 37 (2026-09-16)
+
+### Summary
+
+Follow-up to Build 36 after testing on the iPhone: iOS is much better, but the "hold steady" stage still restarts more often than it should. The hold has been loosened further, without weakening the requirement that a document is genuinely detected before an automatic capture.
+
+The real problem was not the tolerance figures on their own. Until now, a single frame judged unsteady threw the entire hold away and started counting from zero, so on a handset where the detector places the corners slightly differently from one frame to the next, the hold could never finish. A frame that lands wide of where the document has been sitting now costs one earned frame and leaves the hold standing, exactly as a missed frame already did. Only three such frames in a row, or losing the document altogether, ends the hold and starts a new one.
+
+Alongside that, the tolerances were widened: per-frame steadiness from 4.5 to 6.5 per cent of the frame diagonal, cumulative movement across the hold from 6 to 7 per cent, the stale window from 0.9 to 1.1 seconds, and consecutive missed frames tolerated from three to four.
+
+Genuine detection is unchanged and is now enforced at the moment of capture as well: the shutter only fires on a frame the detector has just judged settled, so a capture always lands on a document sitting still in the place it was held, after the full warm-up, the full 1.4 second hold and six earned detections.
+
+### Technical notes
+
+- `lib/doc-scan-gate.ts` is the only application file changed. A frame is "displaced" when it lands outside either tolerance (wide of the smoothed reference, or too far from where the hold began). A displaced frame decays one earned frame and leaves the anchor, the start time and the smoothed reference untouched, so a frame that comes back to the settled position simply carries on. Three consecutive displaced frames are treated as the document genuinely going somewhere, and restart the hold from that new position.
+- Auto-capture now also requires the current frame not to be displaced. This is what preserves the slow-pan guard: a document panning across the frame trips the cumulative tolerance just before the hold completes, so the capture is blocked and the streak then decays.
+- Cumulative movement was widened to 7 per cent rather than further. On the detection canvas that is about 51 px of total travel. The "moving document does not capture" test pans at about 40 px per second; at 8 per cent that pan would capture, at 7 per cent it does not.
+- Honest limit of the loosening: a document creeping very slowly, roughly 20 px per second on the detection canvas, can now complete a hold having moved about 28 px. That is a nearly still document and is the deliberate cost of making the hold usable on iOS.
+- `lib/doc-scan.ts` (the detector), `components/scanner/scanner-screen.tsx`, `app/globals.css`, `lib/auto-lock.ts` and `components/security/lock-provider.tsx` are unchanged, so the Build 33 detection results, the Build 34 auto-lock behaviour and the Build 36 viewfinder and diagnostics all still stand. No schema, data or package dependency change.
+
+### Verification
+
+- Gate unit test: 19 of 19 checks pass, including three new cases. "Shaky hand still captures" (the document stays put but every fourth frame is placed wide of the mark, which is the iOS symptom) captures at 3.4 seconds. "Constant wobble does not capture" (never settles, every other frame elsewhere) correctly never captures. "A document that moves and stays serves a fresh hold" captures 1.8 seconds after the move, so the shutter cannot fire on the position the document left behind.
+- The same shaky-hand feed was run against the Build 36 gate for comparison: it never captured, which confirms the case Richard hit was impossible to complete before this change.
+- All Build 36 guards still hold: a moving document, flickering detection, a full-frame shape and 30 sessions of random shapes (0 captures) all still refuse to capture, and the steady document still captures at 2.6 seconds with the warm-up and hold respected.
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Not verified on hardware: real iPhone and Samsung Browser devices cannot be run from the build environment. The iOS behaviour needs a spot-check on the reporting device after deploy, and the `?debug=1` panel from Build 36 is there so the figures can be read from the handset rather than inferred.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds also await that deploy.
+- Build counter is now at 37. The next 5-build review point is Build 40.

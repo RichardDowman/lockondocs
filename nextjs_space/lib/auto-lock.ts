@@ -1,7 +1,7 @@
 // Auto-lock settings shared between the settings screen, the lock provider and
 // the user API. The vault locks after this many idle minutes on a device, and
-// also whenever the app is backgrounded and reopened. A value of 0 means the
-// vault never auto-locks.
+// also when the app has been left in the background for at least that long.
+// A value of 0 means the vault never auto-locks.
 
 export const DEFAULT_AUTO_LOCK_MINUTES = 5;
 
@@ -9,7 +9,14 @@ export const DEFAULT_AUTO_LOCK_MINUTES = 5;
 export const AUTO_LOCK_CHOICES: number[] = [1, 3, 5, 10, 0];
 
 // localStorage key that keeps the vault locked across reloads on this device.
+// It is cleared whenever there is no signed-in session, so a lock left behind
+// by a previous session can never greet the next sign-in.
 export const AUTO_LOCK_STORAGE_KEY = "lockondocs.locked";
+
+// localStorage key holding the timestamp (ms) at which the app was last hidden.
+// On return we compare it against the auto-lock window: a quick app switch or
+// the navigation that happens right after signing in must not lock the vault.
+export const AUTO_LOCK_HIDDEN_AT_KEY = "lockondocs.hiddenAt";
 
 // Window event dispatched by the settings screen when the user changes the
 // auto-lock window, so the mounted lock provider can pick up the new value

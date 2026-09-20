@@ -39,8 +39,9 @@ Two related areas: a per-user Settings screen, and a full Admin console for priv
 
 ### Auto-lock (Build 31)
 
-- Settings has an Auto-lock chooser: the vault locks itself after a period of inactivity and re-locks whenever the app is sent to the background and reopened. This matters because the app runs inside the GoodBarber mobile shell where a phone can be put down mid-session.
-- The timeout is a per-user setting with choices of 1, 3, 5 or 10 minutes, or Never, defaulting to 5 minutes. Background-and-reopen locking applies whenever a timeout is set (it is skipped only for Never).
+- Settings has an Auto-lock chooser: the vault locks itself after a period of inactivity, and also locks on return if the app has been left in the background for at least that same period. This matters because the app runs inside the GoodBarber mobile shell where a phone can be put down mid-session.
+- The timeout is a per-user setting with choices of 1, 3, 5 or 10 minutes, or Never, defaulting to 5 minutes. Background locking applies whenever a timeout is set (it is skipped only for Never).
+- Changed in Build 34: backgrounding used to lock instantly on return, however briefly the app had been away. It is now measured against the chosen timeout, so a quick app switch no longer locks. This also removed a bug where a first sign-in landed straight on the lock screen, because the navigation that follows sign-in counts as a momentary background on some Android browsers and any lock left behind by a previous session was being restored.
 - The lock is a full-screen password overlay, not a sign-out, so the session and its first-party cookies survive and unlocking is a single password step. The locked state is remembered on the device so a reload keeps the vault locked until the password is entered.
 - Unlocking uses the same re-authentication step as the masked-field reveal (see files.md): a dedicated endpoint re-checks the signed-in user's password. It deliberately does not affect the login lockout counters, since it confirms an already-signed-in user, and it records an audit entry for each success or failure.
 - Not built in this bundle and still open (separate go-ahead needed): document sharing, multi-person profiles, and application-level encryption at rest (a deferred accepted risk).

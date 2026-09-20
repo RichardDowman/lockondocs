@@ -36,7 +36,7 @@
 
 ### Build Tracking
 
-- **Build counter:** Track all builds in `build_state.md`. Current counter: 31.
+- **Build counter:** Track all builds in `build_state.md`. Current counter: 37.
 - **Prompt the user** to review/update `build_state.md` every 5 build updates.
 - `build_state.md` is **always additive** - never remove entries, only append new ones.
 
@@ -104,7 +104,7 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 - In-app expiry reminders (bell/badge), plus two branded reminder emails per expiry cycle: one "expiring soon" (within 30 days) and one "expired". No push notifications, because the app runs embedded in the GoodBarber shell. A per-user opt-out toggle and an admin email log are included. Build 30 fixed a 30-day boundary so a document exactly 30 days out is included.
 
 ### Phase C - Access security (built, Build 31)
-- Auto-lock (choices 1, 3, 5, 10 minutes or Never; default 5) that also locks when the app is backgrounded and reopened, masked sensitive field values that require a password reveal, and a re-authentication endpoint. The lock is an in-app overlay, not a sign-out, so the GoodBarber session survives.
+- Auto-lock (choices 1, 3, 5, 10 minutes or Never; default 5) that also locks on return when the app has been left in the background for at least that same period (Build 34 changed this from locking on any return), masked sensitive field values that require a password reveal, and a re-authentication endpoint. The lock is an in-app overlay, not a sign-out, so the GoodBarber session survives, and it is never shown straight after a sign-in.
 - Still open (need a separate go-ahead): document sharing, multi-person profiles, encryption at rest (accepted risk, not built).
 
 ## Key Contacts
@@ -124,5 +124,5 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 | Docs format | .md |
 | Currency | GBP (USD at ~1.27) |
 | Data sensitivity | High (PII, medical, school) |
-| Build counter | 31 |
+| Build counter | 37 |
 | Current phase | Phases 1 and 2 complete; client Phases A, B and C built (Builds 25 to 31); Phase 3 (GoodBarber) next |

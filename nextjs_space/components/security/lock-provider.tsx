@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AUTO_LOCK_STORAGE_KEY,
+  AUTO_LOCK_HIDDEN_AT_KEY,
   AUTO_LOCK_CHANGED_EVENT,
   DEFAULT_AUTO_LOCK_MINUTES,
   normalizeAutoLockMinutes,
@@ -29,10 +30,16 @@ const ACTIVITY_EVENTS = [
 
 /**
  * Client-side auto-lock. When the signed-in user is idle for their chosen
- * number of minutes, or the app is backgrounded and reopened, a full-screen
- * overlay covers the vault and the user must re-enter their password to carry
- * on. The NextAuth session itself is preserved (this is an overlay, not a
- * sign-out) so the GoodBarber in-app session and cookies survive.
+ * number of minutes, or the app has been left in the background for at least
+ * that long, a full-screen overlay covers the vault and the user must re-enter
+ * their password to carry on. The NextAuth session itself is preserved (this is
+ * an overlay, not a sign-out) so the GoodBarber in-app session and cookies
+ * survive.
+ *
+ * The lock is only ever raised once the chosen window has actually elapsed. A
+ * quick app switch does not lock, and a fresh sign-in never lands on the lock
+ * screen: any lock state left behind by a previous session is cleared while
+ * there is no signed-in user.
  *
  * A value of 0 minutes means "Never" - no idle lock and no background lock.
  */
@@ -48,6 +55,7 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("");
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hiddenAtRef = useRef<number | null>(null);
   const minutesRef = useRef(minutes);
   const lockedRef = useRef(locked);
   minutesRef.current = minutes;
@@ -80,39 +88,77 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
   // Load the user's auto-lock setting and any persisted locked state once the
   // session is known to be authenticated.
   useEffect(() => {
+    if (status === "unauthenticated") {
+      // Nobody is signed in, so there is nothing to protect. Drop any lock
+      // state left behind by a previous session on this device, otherwise the
+      // next sign-in would land straight on the lock screen.
+      clearTimer();
+      hiddenAtRef.current = null;
+      try {
+        window.localStorage.removeItem(AUTO_LOCK_STORAGE_KEY);
+        window.localStorage.removeItem(AUTO_LOCK_HIDDEN_AT_KEY);
+      } catch {
+        /* ignore */
+      }
+      setLocked(false);
+      return;
+    }
     if (!authenticated) {
+      // Session still loading: leave everything as it is.
       clearTimer();
       return;
     }
     let cancelled = false;
 
     // Restore a locked state that survived a reload.
+    let restored = false;
     try {
       if (window.localStorage.getItem(AUTO_LOCK_STORAGE_KEY) === "1") {
         setLocked(true);
+        restored = true;
       }
     } catch {
       /* ignore */
     }
 
     (async () => {
+      let m = minutesRef.current;
       try {
         const res = await fetch("/api/user");
         const data = await res.json().catch(() => ({}));
         if (!cancelled && res.ok) {
-          setMinutes(normalizeAutoLockMinutes(data?.user?.autoLockMinutes));
+          m = normalizeAutoLockMinutes(data?.user?.autoLockMinutes);
+          setMinutes(m);
         }
       } catch {
         /* keep default */
       } finally {
-        if (!cancelled) armTimer();
+        if (!cancelled) {
+          if (!restored) {
+            // The app may have been closed while in the background. Lock only
+            // if it stayed away for at least the auto-lock window.
+            let since: number | null = null;
+            try {
+              const raw = window.localStorage.getItem(AUTO_LOCK_HIDDEN_AT_KEY);
+              const parsed = raw ? Number(raw) : NaN;
+              since = Number.isFinite(parsed) ? parsed : null;
+              window.localStorage.removeItem(AUTO_LOCK_HIDDEN_AT_KEY);
+            } catch {
+              /* ignore */
+            }
+            if (m > 0 && since && Date.now() - since >= m * 60 * 1000) {
+              lockNow();
+            }
+          }
+          armTimer();
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [authenticated, armTimer, clearTimer]);
+  }, [status, authenticated, armTimer, clearTimer, lockNow]);
 
   // Live-update the window when the user changes the setting in Settings.
   useEffect(() => {
@@ -149,17 +195,41 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
     };
   }, [authenticated, locked, armTimer]);
 
-  // Lock when the app is backgrounded and reopened (unless set to Never).
+  // Lock when the app has been left in the background for at least the chosen
+  // window (unless set to Never). Hiding the page for a moment, which also
+  // happens during the navigation right after signing in, must not lock.
   useEffect(() => {
     if (!authenticated) return;
     function onVisibility() {
+      const m = minutesRef.current;
       if (document.visibilityState === "hidden") {
-        if (minutesRef.current > 0) lockNow();
+        if (m > 0) {
+          const now = Date.now();
+          hiddenAtRef.current = now;
+          try {
+            window.localStorage.setItem(AUTO_LOCK_HIDDEN_AT_KEY, String(now));
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+      const since = hiddenAtRef.current;
+      hiddenAtRef.current = null;
+      try {
+        window.localStorage.removeItem(AUTO_LOCK_HIDDEN_AT_KEY);
+      } catch {
+        /* ignore */
+      }
+      if (m > 0 && since && Date.now() - since >= m * 60 * 1000) {
+        lockNow();
+      } else if (!lockedRef.current) {
+        armTimer();
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [authenticated, lockNow]);
+  }, [authenticated, lockNow, armTimer]);
 
   async function handleUnlock() {
     if (!password) {
@@ -177,8 +247,10 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         setLocked(false);
         setPassword("");
+        hiddenAtRef.current = null;
         try {
           window.localStorage.removeItem(AUTO_LOCK_STORAGE_KEY);
+          window.localStorage.removeItem(AUTO_LOCK_HIDDEN_AT_KEY);
         } catch {
           /* ignore */
         }
@@ -195,8 +267,10 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function handleSignOut() {
+    hiddenAtRef.current = null;
     try {
       window.localStorage.removeItem(AUTO_LOCK_STORAGE_KEY);
+      window.localStorage.removeItem(AUTO_LOCK_HIDDEN_AT_KEY);
     } catch {
       /* ignore */
     }

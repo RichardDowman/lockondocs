@@ -212,6 +212,27 @@
     .gold-shimmer::after { animation: none; display: none; }
   }
 
+  /* Scanner viewfinder: the "searching for edges" state. Corner brackets at
+     document proportions breathe while a thin line sweeps the frame, so the
+     idle camera clearly looks like it is hunting rather than showing a fixed
+     box to line up against. Replaced by the live outline once edges are found. */
+  .scan-breathe { animation: scan-breathe 1.9s ease-in-out infinite; }
+  @keyframes scan-breathe {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+  .scan-sweep { animation: scan-sweep 2.4s ease-in-out infinite; }
+  @keyframes scan-sweep {
+    0% { top: 2%; opacity: 0; }
+    15% { opacity: 0.95; }
+    85% { opacity: 0.95; }
+    100% { top: 98%; opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scan-breathe, .scan-sweep { animation: none; }
+    .scan-sweep { top: 50%; opacity: 0.7; }
+  }
+
   /* Soft polished-gold tile for pale accent icon backgrounds. */
   .gold-tile {
     background-color: hsl(42 46% 90%);
