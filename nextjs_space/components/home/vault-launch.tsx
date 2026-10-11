@@ -13,7 +13,7 @@ import { ReactNode } from "react";
  * sign-in toasts, spins and then sticks on the login screen.
  *
  * Opening the target in a new top-level context (the in-app browser with its
- * web header, exactly like the previous "open in browser" behaviour) makes the
+ * web header, exactly like the previous "open in browser" behavior) makes the
  * app run first-party, so cookies, login and the camera all work.
  */
 export function VaultLaunch({

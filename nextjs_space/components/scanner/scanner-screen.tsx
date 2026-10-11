@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Camera,
@@ -22,6 +22,8 @@ import {
   Image as ImageIcon,
   ScanLine,
   Sparkles,
+  ChevronLeft,
+  ChevronRight,
   Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,7 +44,6 @@ import {
   buildPdfFromImages,
   renderThumbnailContain,
   renderThumbnailCover,
-  centeredFrame,
   type CropRect,
   type ProcessedPage,
 } from "@/lib/imaging";
@@ -53,6 +54,18 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ThumbFramer } from "@/components/scanner/thumb-framer";
+import type { VisibleRect } from "@/lib/use-pinch-zoom";
 import { takePendingUpload } from "@/lib/pending-upload";
 import type { FieldDef } from "@/lib/vault-fields";
 import {
@@ -62,6 +75,8 @@ import {
   blendCorners,
   cornersDrift,
   correctCanvasToDataUrl,
+  scaleCorners,
+  MAX_SOURCE_PIXELS,
   type Corners,
 } from "@/lib/doc-scan";
 import { createCaptureGate, DETECT_INTERVAL_MS, type CaptureGate } from "@/lib/doc-scan-gate";
@@ -164,9 +179,18 @@ export function ScannerScreen({
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const cropLayerRef = useRef<HTMLDivElement | null>(null);
-  const thumbLayerRef = useRef<HTMLDivElement | null>(null);
   const thumbSourceRef = useRef<HTMLImageElement | null>(null);
-  const thumbDragRef = useRef<{ startXn: number; startYn: number; startRect: CropRect } | null>(null);
+  // Read the framed area / reset the framing inside the thumbnail dialog.
+  const thumbRectRef = useRef<(() => VisibleRect) | null>(null);
+  const thumbResetRef = useRef<(() => void) | null>(null);
+  // Unsaved-scan guard: the latest dirty flag, whether our back-gesture history
+  // entry is on the stack, whether leaving is now allowed, the action waiting
+  // on the exit dialog, and a navigation queued behind history.back().
+  const dirtyRef = useRef(false);
+  const guardPushedRef = useRef(false);
+  const allowExitRef = useRef(false);
+  const pendingExitRef = useRef<(() => void) | null>(null);
+  const leaveRef = useRef<(() => void) | null>(null);
   const dragRef = useRef<
     | { mode: "move" | "nw" | "ne" | "sw" | "se"; startXn: number; startYn: number; startRect: CropRect }
     | null
@@ -188,6 +212,11 @@ export function ScannerScreen({
   const steadyDrawRef = useRef(0);
   const lastDrawAtRef = useRef(0);
   const capturingRef = useRef(false);
+  // The latest well-framed outline from the live preview (in detect-canvas
+  // pixels), used as a fallback when straightening the full-resolution frame.
+  const lastGoodRef = useRef<{ corners: Corners; cw: number; ch: number; at: number } | null>(null);
+  // Half-size scratch canvas for the live detector's stepped downscale.
+  const stepCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // Timestamps of recently abandoned holds. Several in a short window means the
   // phone is finding the page but cannot keep it still, which is when the hint
   // should point at the manual shutter instead of repeating "hold steady".
@@ -208,6 +237,7 @@ export function ScannerScreen({
     vh: 0,
     cw: 0,
     ch: 0,
+    cam: "",
   });
   // The two versions of the just-captured page, both kept so the review screen
   // can toggle between them: the auto-straightened crop and the untouched frame.
@@ -240,8 +270,17 @@ export function ScannerScreen({
   const [thumbBlob, setThumbBlob] = useState<Blob | null>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [thumbOpen, setThumbOpen] = useState(false);
-  const [thumbFrame, setThumbFrame] = useState<CropRect | null>(null);
-  const [thumbSize, setThumbSize] = useState(1);
+  // Exit confirmation for an unsaved scan (Build 38).
+  const [exitOpen, setExitOpen] = useState(false);
+  // Which question the review card is on. Back to the first step whenever a
+  // fresh scan or file arrives (a failed save returns to edit and keeps it).
+  const [detailStep, setDetailStep] = useState(0);
+  const prevStageRef = useRef(stage);
+  useEffect(() => {
+    const prev = prevStageRef.current;
+    prevStageRef.current = stage;
+    if (stage === "edit" && prev !== "edit" && prev !== "saving") setDetailStep(0);
+  }, [stage]);
   const [thumbBusy, setThumbBusy] = useState(false);
   // The image shown inside the framing dialog. The overlay layer wraps the
   // rendered <img> (inline-block) so the frame lines up exactly.
@@ -287,6 +326,7 @@ export function ScannerScreen({
     breaks: number;
     video: string;
     detect: string;
+    cam: string;
   } | null>(null);
 
   const stopStream = useCallback(() => {
@@ -306,10 +346,46 @@ export function ScannerScreen({
         setStage("nocamera");
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const md = navigator.mediaDevices;
+      // Open the rear camera exactly as Build 37 did, so the phone picks the
+      // same lens it used when edge detection worked. Asking for 4K in the
+      // first request (Build 38) can steer a multi-lens phone to a different
+      // rear lens and makes the live preview heavy, which cost us auto-detect.
+      let stream = await md.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false,
       });
+      // Then raise the SAME camera to 1080p for a sharper picture. This keeps
+      // the chosen lens; if the browser refuses, the default stream stays.
+      // The full-resolution photo at the shutter (where supported) is the
+      // main readability path, so the live stream does not need 4K.
+      try {
+        const t = stream.getVideoTracks()[0];
+        const s = t?.getSettings?.() ?? {};
+        const portrait = (s.height ?? 0) > (s.width ?? 0);
+        await t?.applyConstraints?.({
+          width: { ideal: portrait ? 1080 : 1920 },
+          height: { ideal: portrait ? 1920 : 1080 },
+        });
+      } catch {
+        // keep the default resolution
+      }
+      // Android: keep autofocus running continuously where the browser allows.
+      const track = stream.getVideoTracks()[0];
+      try {
+        const caps: any = track?.getCapabilities?.() ?? {};
+        if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
+          await track.applyConstraints({ advanced: [{ focusMode: "continuous" } as any] });
+        }
+      } catch {
+        // not supported; the camera's default focus applies
+      }
+      try {
+        const s = track?.getSettings?.() ?? {};
+        diagRef.current.cam = `${track?.label || "camera"} ${s.width ?? "?"}x${s.height ?? "?"}`;
+      } catch {
+        diagRef.current.cam = "camera";
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -416,17 +492,22 @@ export function ScannerScreen({
       return;
     }
     capturingRef.current = true;
-    const tmp = document.createElement("canvas");
-    tmp.width = vw;
-    tmp.height = vh;
-    const ctx = tmp.getContext("2d");
+    const hintSnap = lastGoodRef.current;
+    lastGoodRef.current = null;
+    const startedAt = performance.now();
+    // Freeze the full-resolution video frame straight away, so the shutter
+    // feels instant whatever happens next.
+    const vk = Math.min(1, Math.sqrt(MAX_SOURCE_PIXELS / (vw * vh)));
+    const videoCanvas = document.createElement("canvas");
+    videoCanvas.width = Math.max(1, Math.round(vw * vk));
+    videoCanvas.height = Math.max(1, Math.round(vh * vk));
+    const ctx = videoCanvas.getContext("2d");
     if (!ctx) {
       capturingRef.current = false;
       return;
     }
-    ctx.drawImage(video, 0, 0, vw, vh);
-    const rawDataUrl = tmp.toDataURL("image/jpeg", 0.92);
-    stopStream();
+    ctx.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
+    const videoRaw = videoCanvas.toDataURL("image/jpeg", 0.95);
     setOverlay(null);
     gateRef.current?.reset();
     smoothRef.current = null;
@@ -435,31 +516,105 @@ export function ScannerScreen({
     breaksRef.current = [];
     strugglingRef.current = false;
     setStruggling(false);
-    // Straighten the document on-device when the CV runtime is already loaded.
-    // Any failure falls back to the untouched frame, so a capture never breaks.
-    let corrected: string | null = null;
-    try {
-      if (isScannerReady() && scannerRef.current) {
-        corrected = correctCanvasToDataUrl(tmp, scannerRef.current);
-      }
-    } catch {
-      corrected = null;
-    }
     // Hold a short confirmation on the frozen frame: a white shutter flash, a
     // tick and "Scan captured". Without it an automatic capture simply jumps to
     // the details form and the user never sees that the scan landed.
-    setCaptureFlash(corrected ?? rawDataUrl);
+    setCaptureFlash(videoRaw);
     setFlashOn(true);
     window.setTimeout(() => setFlashOn(false), 90);
-    await new Promise((resolve) =>
-      window.setTimeout(resolve, CAPTURE_CONFIRM_MS),
-    );
+
+    // Where the browser can take a real photo (Chrome on Android), use it: it
+    // is usually several times the resolution of the video stream and goes
+    // through the camera's own sharpening. iOS has no such API, so it keeps
+    // the full-resolution video frame. Bounded, so a slow camera never stalls.
+    let still: HTMLCanvasElement | null = null;
+    try {
+      const IC = (window as any).ImageCapture;
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      if (IC && track && track.readyState === "live") {
+        const ic = new IC(track);
+        const settings: Record<string, string> = {};
+        try {
+          const caps = await ic.getPhotoCapabilities();
+          if (Array.isArray(caps?.fillLightMode) && caps.fillLightMode.includes("off")) {
+            settings.fillLightMode = "off";
+          }
+        } catch {
+          /* no photo capabilities */
+        }
+        const blob: Blob | null = await Promise.race([
+          ic.takePhoto(settings).catch(() => null),
+          new Promise<null>((res) => window.setTimeout(() => res(null), 2000)),
+        ]);
+        if (blob) {
+          const bmp = await createImageBitmap(blob);
+          const sameShape = bmp.width >= bmp.height === vw >= vh;
+          if (sameShape && bmp.width * bmp.height > vw * vh * 1.2) {
+            const k = Math.min(1, Math.sqrt(MAX_SOURCE_PIXELS / (bmp.width * bmp.height)));
+            const sc = document.createElement("canvas");
+            sc.width = Math.max(1, Math.round(bmp.width * k));
+            sc.height = Math.max(1, Math.round(bmp.height * k));
+            const sctx = sc.getContext("2d");
+            if (sctx) {
+              sctx.imageSmoothingQuality = "high";
+              sctx.drawImage(bmp, 0, 0, sc.width, sc.height);
+              still = sc;
+            }
+          }
+          bmp.close?.();
+        }
+      }
+    } catch {
+      still = null;
+    }
+    stopStream();
+    // Let the confirmation paint before the heavier straightening work.
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+    // Straighten the document on-device when the CV runtime is already loaded.
+    // Any failure falls back to the untouched frame, so a capture never breaks.
+    let raw = videoRaw;
+    let corrected: string | null = null;
+    const scanner = isScannerReady() ? scannerRef.current : null;
+    if (still) {
+      try {
+        raw = still.toDataURL("image/jpeg", 0.95);
+        if (scanner) corrected = correctCanvasToDataUrl(still, scanner, 0.95);
+      } catch {
+        corrected = null;
+      }
+    }
+    if (!corrected && scanner) {
+      try {
+        const hint =
+          hintSnap && startedAt - hintSnap.at < 1000
+            ? scaleCorners(
+                hintSnap.corners,
+                videoCanvas.width / hintSnap.cw,
+                videoCanvas.height / hintSnap.ch,
+              )
+            : null;
+        const fromVideo = correctCanvasToDataUrl(videoCanvas, scanner, 0.95, hint);
+        if (fromVideo) {
+          corrected = fromVideo;
+          // Keep the pair consistent: the original shown beside this crop is
+          // the same video frame it was cut from.
+          raw = videoRaw;
+        }
+      } catch {
+        corrected = null;
+      }
+    }
+    const remaining = CAPTURE_CONFIRM_MS - (performance.now() - startedAt);
+    if (remaining > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, remaining));
+    }
     if (corrected) {
-      setVersions(corrected, rawDataUrl);
+      setVersions(corrected, raw);
       loadSourceFromDataUrl(corrected);
     } else {
       setVersions(null, null);
-      loadSourceFromDataUrl(rawDataUrl);
+      loadSourceFromDataUrl(raw);
     }
     // The confirmation lives inside the camera stage, which the review screen
     // replaces. This is only a safety net in case the image fails to load.
@@ -535,7 +690,35 @@ export function ScannerScreen({
       dc.height = ch;
       const dctx = dc.getContext("2d");
       if (!dctx) return;
-      dctx.drawImage(video, 0, 0, cw, ch);
+      dctx.imageSmoothingEnabled = true;
+      dctx.imageSmoothingQuality = "high";
+      // A sharp stream shrunk to 360px in one jump turns print and texture
+      // into speckle that hides the page edges. Halve it first, then finish,
+      // so the detector sees a clean, averaged picture.
+      if (vw > cw * 2.5) {
+        let sc = stepCanvasRef.current;
+        if (!sc) {
+          sc = document.createElement("canvas");
+          stepCanvasRef.current = sc;
+        }
+        const hw = cw * 2;
+        const hh = ch * 2;
+        if (sc.width !== hw || sc.height !== hh) {
+          sc.width = hw;
+          sc.height = hh;
+        }
+        const sctx = sc.getContext("2d");
+        if (sctx) {
+          sctx.imageSmoothingEnabled = true;
+          sctx.imageSmoothingQuality = "high";
+          sctx.drawImage(video, 0, 0, hw, hh);
+          dctx.drawImage(sc, 0, 0, cw, ch);
+        } else {
+          dctx.drawImage(video, 0, 0, cw, ch);
+        }
+      } else {
+        dctx.drawImage(video, 0, 0, cw, ch);
+      }
       let corners: Corners | null = null;
       const detectStart = performance.now();
       try {
@@ -559,6 +742,11 @@ export function ScannerScreen({
       d.frames = verdict.frames;
       d.drift = verdict.drift;
       d.total = verdict.totalDrift;
+      // Remember the latest well-framed outline, so a capture can still be
+      // straightened if the full-size frame happens to confuse the detector.
+      if (corners && verdict.good) {
+        lastGoodRef.current = { corners, cw, ch, at: now };
+      }
 
       // Count abandoned holds over a short rolling window. Three or more means
       // the page keeps being found and lost, so offer the shutter.
@@ -618,7 +806,7 @@ export function ScannerScreen({
       smoothRef.current = drawn;
       lastDrawAtRef.current = now;
 
-      // Map small-canvas coords to on-screen pixels, honouring object-cover.
+      // Map small-canvas coords to on-screen pixels, honoring object-cover.
       const rect = video.getBoundingClientRect();
       const coverScale = Math.max(rect.width / vw, rect.height / vh);
       const offX = (rect.width - vw * coverScale) / 2;
@@ -706,6 +894,7 @@ export function ScannerScreen({
         breaks: c.breaks,
         video: `${c.vw}x${c.vh}`,
         detect: `${c.cw}x${c.ch}`,
+        cam: c.cam || "n/a",
       });
       c.runs = 0;
       c.sumMs = 0;
@@ -728,7 +917,7 @@ export function ScannerScreen({
           const converted = await heic2any({
             blob: file,
             toType: "image/jpeg",
-            quality: 0.92,
+            quality: 0.95,
           });
           source = Array.isArray(converted) ? converted[0] : (converted as Blob);
         }
@@ -745,16 +934,19 @@ export function ScannerScreen({
           if (scanner) {
             scannerRef.current = scanner;
             const img = await loadImage(dataUrl);
-            const w = img.naturalWidth || img.width;
-            const h = img.naturalHeight || img.height;
-            if (w > 0 && h > 0) {
+            const w0 = img.naturalWidth || img.width;
+            const h0 = img.naturalHeight || img.height;
+            if (w0 > 0 && h0 > 0) {
+              // Stay under the iOS canvas limit for very large photos.
+              const k = Math.min(1, Math.sqrt(MAX_SOURCE_PIXELS / (w0 * h0)));
               const cvs = document.createElement("canvas");
-              cvs.width = w;
-              cvs.height = h;
+              cvs.width = Math.max(1, Math.round(w0 * k));
+              cvs.height = Math.max(1, Math.round(h0 * k));
               const ctx = cvs.getContext("2d");
               if (ctx) {
-                ctx.drawImage(img, 0, 0);
-                const corrected = correctCanvasToDataUrl(cvs, scanner);
+                ctx.imageSmoothingQuality = "high";
+                ctx.drawImage(img, 0, 0, cvs.width, cvs.height);
+                const corrected = correctCanvasToDataUrl(cvs, scanner, 0.95);
                 if (corrected) {
                   setVersions(corrected, dataUrl);
                   loadSourceFromDataUrl(corrected);
@@ -984,8 +1176,8 @@ export function ScannerScreen({
 
   // --- Preview thumbnail framing ---
   // Bake the first/current page (with its current rotation and adjustments) and
-  // open a dialog where the user drags a portrait frame to choose the part of
-  // the document shown on the vault tile.
+  // open a dialog where the user pinches, zooms and drags the page under a
+  // tile-shaped window to choose the part shown on the vault tile (Build 38).
   const openThumbDialog = useCallback(async () => {
     try {
       setThumbBusy(true);
@@ -996,11 +1188,7 @@ export function ScannerScreen({
       }
       const img = await loadImage(baked.dataUrl);
       thumbSourceRef.current = img;
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
       setThumbImgUrl(baked.dataUrl);
-      setThumbSize(1);
-      setThumbFrame(centeredFrame(w, h, undefined, 1));
       setThumbOpen(true);
     } catch (err) {
       toast.error("Could not open the thumbnail tool.");
@@ -1009,63 +1197,15 @@ export function ScannerScreen({
     }
   }, [pages, bakeCurrent]);
 
-  const thumbNormFromEvent = useCallback((e: React.PointerEvent) => {
-    const layer = thumbLayerRef.current;
-    if (!layer) return { xn: 0, yn: 0 };
-    const r = layer.getBoundingClientRect();
-    return {
-      xn: clamp((e.clientX - r.left) / r.width, 0, 1),
-      yn: clamp((e.clientY - r.top) / r.height, 0, 1),
-    };
-  }, []);
-
-  const startThumbDrag = (e: React.PointerEvent) => {
-    if (!thumbFrame) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const { xn, yn } = thumbNormFromEvent(e);
-    thumbDragRef.current = { startXn: xn, startYn: yn, startRect: thumbFrame };
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-
-  const onThumbPointerMove = (e: React.PointerEvent) => {
-    const d = thumbDragRef.current;
-    if (!d) return;
-    const { xn, yn } = thumbNormFromEvent(e);
-    const s = d.startRect;
-    const x = clamp(s.x + (xn - d.startXn), 0, 1 - s.w);
-    const y = clamp(s.y + (yn - d.startYn), 0, 1 - s.h);
-    setThumbFrame({ x, y, w: s.w, h: s.h });
-  };
-
-  const onThumbPointerUp = () => {
-    thumbDragRef.current = null;
-  };
-
-  const onThumbSizeChange = (val: number) => {
-    setThumbSize(val);
-    const img = thumbSourceRef.current;
-    if (!img) return;
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
-    const base = centeredFrame(w, h, undefined, val);
-    setThumbFrame((prev) => {
-      if (!prev) return base;
-      // Keep the frame centred on its current middle while resizing.
-      const cx = prev.x + prev.w / 2;
-      const cy = prev.y + prev.h / 2;
-      const x = clamp(cx - base.w / 2, 0, 1 - base.w);
-      const y = clamp(cy - base.h / 2, 0, 1 - base.h);
-      return { x, y, w: base.w, h: base.h };
-    });
-  };
-
   const applyThumbFrame = async () => {
     const img = thumbSourceRef.current;
-    if (!img || !thumbFrame) return;
+    if (!img) return;
     try {
       setThumbBusy(true);
-      const t = await renderThumbnailCover(img, { frame: thumbFrame });
+      // Whatever sits inside the tile-shaped window right now, as a fraction of
+      // the page. A centered crop is used if the framer is not ready.
+      const frame = thumbRectRef.current?.() ?? null;
+      const t = await renderThumbnailCover(img, { frame });
       setThumbBlob(t.blob);
       setThumbUrl(t.dataUrl);
       setThumbOpen(false);
@@ -1138,6 +1278,24 @@ export function ScannerScreen({
     resetWorking();
     setStage("choose");
   }, [stopStream, resetWorking]);
+  // Navigate away for good (after a save or a confirmed exit). If the back-
+  // gesture guard entry is on the history stack it is stepped off first, so
+  // the scanner does not reappear when the user later presses back.
+  const leave = useCallback((go: () => void) => {
+    allowExitRef.current = true;
+    if (!guardPushedRef.current) {
+      go();
+      return;
+    }
+    guardPushedRef.current = false;
+    leaveRef.current = go;
+    window.history.back();
+    window.setTimeout(() => {
+      const pending = leaveRef.current;
+      leaveRef.current = null;
+      pending?.();
+    }, 400);
+  }, []);
 
   const save = useCallback(async () => {
     if (!folderId) {
@@ -1182,7 +1340,7 @@ export function ScannerScreen({
         }
         name =
           docName.trim() ||
-          `Scan ${new Date().toLocaleDateString("en-GB", { timeZone: "UTC" })}`;
+          `Scan ${new Date().toLocaleDateString("en-US", { timeZone: "UTC" })}`;
         // Use the user's chosen preview if they set one, otherwise fall back to
         // the whole first page letterboxed on a white card (nothing cropped).
         try {
@@ -1286,20 +1444,336 @@ export function ScannerScreen({
       }
 
       toast.success("Document saved.");
-      router.replace(`/folder/${folderId}`);
+      leave(() => router.replace(`/folder/${folderId}`));
     } catch (err) {
       toast.error("Something went wrong while saving.");
       setStage("edit");
     }
-  }, [bakeCurrent, docName, folderId, folders, metaValues, pages, router, saveAsPdf, pdfFile, thumbBlob]);
+  }, [bakeCurrent, docName, folderId, folders, leave, metaValues, pages, router, saveAsPdf, pdfFile, thumbBlob]);
 
   const close = useCallback(() => {
     stopStream();
-    router.replace("/home");
-  }, [router, stopStream]);
+    leave(() => router.replace("/home"));
+  }, [leave, router, stopStream]);
+
+  // --- Unsaved-scan guard (Build 38) ---
+  // Once a page has been captured or a file chosen, leaving by the close
+  // button, the browser or system back gesture, or a reload asks first. A
+  // native shell closing the whole webview cannot be intercepted by a page.
+  const dirty = stage === "edit" || stage === "saving" || pages.length > 0 || !!pdfFile;
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+    if (!dirty || guardPushedRef.current || allowExitRef.current) return;
+    try {
+      // A same-URL history entry for the back gesture to land on.
+      window.history.pushState({ ...(window.history.state ?? {}), lockonScanGuard: true }, "");
+      guardPushedRef.current = true;
+    } catch (err) {
+      // History unavailable: the close button still asks.
+    }
+  }, [dirty]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const go = leaveRef.current;
+      if (go) {
+        leaveRef.current = null;
+        // The app router handles this same popstate with its own restore. If
+        // our listener runs first, navigating now gets discarded by that
+        // restore, so wait until the router has finished stepping back.
+        window.setTimeout(go, 60);
+        return;
+      }
+      if (!guardPushedRef.current) return;
+      guardPushedRef.current = false;
+      if (allowExitRef.current || !dirtyRef.current) return;
+      try {
+        window.history.pushState({ ...(window.history.state ?? {}), lockonScanGuard: true }, "");
+        guardPushedRef.current = true;
+      } catch (err) {
+        // Fall through and still ask.
+      }
+      pendingExitRef.current = close;
+      setExitOpen(true);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [close]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (allowExitRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  const requestExit = (action: () => void) => {
+    if (!dirty) {
+      action();
+      return;
+    }
+    pendingExitRef.current = action;
+    setExitOpen(true);
+  };
+
+  const confirmExit = () => {
+    const action = pendingExitRef.current;
+    pendingExitRef.current = null;
+    setExitOpen(false);
+    action?.();
+  };
 
   const totalPages = pages.length + (stage === "edit" || stage === "saving" ? 1 : 0);
   const willBePdf = totalPages > 1 || saveAsPdf;
+
+  // The review details, one question per step (see the details card below).
+  const vaultFields = folders.find((f) => f.id === folderId)?.fields ?? [];
+  const savingNow = stage === "saving";
+  const detailSteps: { key: string; title: string; body: ReactNode }[] = [];
+  if (pdfFile) {
+    detailSteps.push({
+      key: "file",
+      title: "Your file",
+      body: (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => requestExit(backToChooser)}
+          disabled={savingNow}
+        >
+          <RotateCcw className="mr-2 h-4 w-4" /> Choose a different source
+        </Button>
+      ),
+    });
+  } else {
+    detailSteps.push({
+      key: "page",
+      title: "Check the page",
+      body: (
+        <>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => setRotation((r) => r - 90)} disabled={savingNow}>
+              <RotateCcw className="mr-1.5 h-4 w-4" /> Left
+            </Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => setRotation((r) => r + 90)} disabled={savingNow}>
+              <RotateCw className="mr-1.5 h-4 w-4" /> Right
+            </Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={enterCrop} disabled={savingNow}>
+              <CropIcon className="mr-1.5 h-4 w-4" /> Crop
+            </Button>
+          </div>
+          {autoCorrected && (
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-primary/40 bg-primary/10 px-3 py-2">
+              <span className="flex items-center gap-2 text-xs font-medium text-primary">
+                <Sparkles className="h-4 w-4 shrink-0" />
+                {showingOriginal ? "Showing the original photo" : "Edges detected and straightened"}
+              </span>
+              {showingOriginal ? (
+                <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs text-primary hover:text-primary" onClick={useCorrectedImage} disabled={savingNow}>
+                  <ScanLine className="mr-1 h-3.5 w-3.5" /> Use auto-cropped
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs text-primary hover:text-primary" onClick={useOriginalImage} disabled={savingNow}>
+                  <Undo2 className="mr-1 h-3.5 w-3.5" /> Use original
+                </Button>
+              )}
+            </div>
+          )}
+          {pages.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Pages in this document ({pages.length + 1})</Label>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {pages.map((p, i) => (
+                  <div key={i} className="relative shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.dataUrl} alt={`Page ${i + 1}`} className="h-16 w-12 rounded border border-border object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePage(i)}
+                      disabled={savingNow}
+                      aria-label={`Remove page ${i + 1}`}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-primary text-primary">
+                  <span className="text-[10px] font-medium">Now</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" onClick={retake} disabled={savingNow}>
+              <RotateCcw className="mr-2 h-4 w-4" /> Retake
+            </Button>
+            <Button variant="outline" onClick={addPage} disabled={savingNow}>
+              <Plus className="mr-2 h-4 w-4" /> Add page
+            </Button>
+          </div>
+        </>
+      ),
+    });
+  }
+  detailSteps.push({
+    key: "vault",
+    title: "Which vault?",
+    body: (
+      <Select value={folderId} onValueChange={setFolderId} disabled={savingNow}>
+        <SelectTrigger aria-label="Vault">
+          <SelectValue placeholder="Choose a vault" />
+        </SelectTrigger>
+        <SelectContent>
+          {(folders ?? []).map((f) => (
+            <SelectItem key={f.id} value={f.id}>
+              {f.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ),
+  });
+  detailSteps.push({
+    key: "name",
+    title: "Name this document",
+    body: (
+      <Input
+        id="docName"
+        aria-label="Document name"
+        value={docName}
+        onChange={(e) => setDocName(e.target.value)}
+        placeholder="e.g. Passport"
+        disabled={savingNow}
+      />
+    ),
+  });
+  vaultFields.forEach((field) => {
+    detailSteps.push({
+      key: `field-${field.key}`,
+      title: field.label,
+      body:
+        field.type === "select" ? (
+          <Select
+            value={metaValues[field.key] ?? ""}
+            onValueChange={(v) => setMetaValues((prev) => ({ ...prev, [field.key]: v }))}
+            disabled={savingNow}
+          >
+            <SelectTrigger aria-label={field.label}>
+              <SelectValue placeholder={`Choose ${field.label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {(field.options ?? []).map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {opt}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <>
+            <Input
+              aria-label={field.label}
+              type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+              value={metaValues[field.key] ?? ""}
+              onChange={(e) => setMetaValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+              placeholder={field.type === "text" ? field.label : undefined}
+              disabled={savingNow}
+            />
+            <p className="text-xs text-muted-foreground">Optional. Leave blank and tap Next to skip.</p>
+          </>
+        ),
+    });
+  });
+  if (!pdfFile) {
+    detailSteps.push({
+      key: "look",
+      title: "Brightness and contrast",
+      body: (
+        <>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-1.5">
+                <Sun className="h-4 w-4" /> Brightness
+              </Label>
+              <span className="font-mono text-xs text-muted-foreground">{brightness}%</span>
+            </div>
+            <Slider value={[brightness]} min={50} max={150} step={1} onValueChange={(v) => setBrightness(v?.[0] ?? 100)} disabled={savingNow} />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-1.5">
+                <Contrast className="h-4 w-4" /> Contrast
+              </Label>
+              <span className="font-mono text-xs text-muted-foreground">{contrast}%</span>
+            </div>
+            <Slider value={[contrast]} min={50} max={150} step={1} onValueChange={(v) => setContrast(v?.[0] ?? 100)} disabled={savingNow} />
+          </div>
+        </>
+      ),
+    });
+    detailSteps.push({
+      key: "finish",
+      title: "Save options",
+      body: (
+        <>
+          <button
+            type="button"
+            disabled={totalPages > 1 || savingNow}
+            onClick={() => setSaveAsPdf((v) => !v)}
+            className="flex w-full items-center justify-between rounded-[var(--radius)] border border-border px-3 py-2.5 text-left disabled:opacity-70"
+          >
+            <span className="text-sm">
+              Save as PDF
+              {totalPages > 1 && <span className="ml-1 text-xs text-muted-foreground">(multi-page)</span>}
+            </span>
+            <span className={`flex h-5 w-9 items-center rounded-full px-0.5 transition ${willBePdf ? "justify-end bg-primary" : "justify-start bg-muted"}`}>
+              <span className="h-4 w-4 rounded-full bg-white shadow" />
+            </span>
+          </button>
+          <div className="flex items-center justify-between rounded-[var(--radius)] border border-border px-3 py-2.5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-9 items-center justify-center overflow-hidden rounded border border-border bg-muted">
+                {thumbUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={thumbUrl} alt="Preview thumbnail" className="h-full w-full object-cover" />
+                ) : (
+                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                )}
+              </div>
+              <div>
+                <p className="text-sm">Preview thumbnail</p>
+                <p className="text-xs text-muted-foreground">{thumbUrl ? "Custom preview set" : "Whole page used by default"}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={openThumbDialog}
+              disabled={savingNow || thumbBusy}
+              className="text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              {thumbUrl ? "Change" : "Set preview thumbnail"}
+            </button>
+          </div>
+        </>
+      ),
+    });
+  }
+  const stepIndex = Math.min(detailStep, Math.max(0, detailSteps.length - 1));
+  const currentStep = detailSteps[stepIndex];
+  const isLastStep = stepIndex === detailSteps.length - 1;
+  const goNextStep = () => {
+    if (currentStep?.key === "vault" && !folderId) {
+      toast.error("Please choose a vault.");
+      return;
+    }
+    if (!isLastStep) setDetailStep(stepIndex + 1);
+  };
 
   const topTitle =
     stage === "choose"
@@ -1318,7 +1792,7 @@ export function ScannerScreen({
       <div className="safe-top flex items-center justify-between px-4 py-3">
         <button
           type="button"
-          onClick={close}
+          onClick={() => requestExit(close)}
           aria-label="Close scanner"
           className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white active:scale-95 no-select"
         >
@@ -1427,7 +1901,7 @@ export function ScannerScreen({
                 <span className="flex flex-col items-center gap-1.5 rounded-full bg-black/55 px-4 py-1.5 text-center text-xs font-medium text-white backdrop-blur">
                   <span>
                     {struggling
-                      ? "Hold still, or tap the shutter to capture"
+                      ? "Hold steady, move back if blurry, or tap the shutter"
                       : overlay?.good
                         ? "Document found, hold steady..."
                         : overlay
@@ -1470,6 +1944,7 @@ export function ScannerScreen({
                 <div>
                   reason {diag.reason}, breaks {diag.breaks}
                 </div>
+                <div className="max-w-[220px] truncate">cam {diag.cam}</div>
               </div>
             )}
             {/* Capture confirmation. A white shutter flash and a tick over the
@@ -1651,289 +2126,67 @@ export function ScannerScreen({
         </div>
       )}
 
-      {/* Edit controls */}
-      {(stage === "edit" || stage === "saving") && !cropping && (
-        <div className="safe-bottom max-h-[56%] overflow-y-auto rounded-t-[var(--radius-lg)] bg-card px-5 pb-6 pt-5">
-          <div className="space-y-4">
-            {!pdfFile && (
-              <>
-                {/* Transform tools */}
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => setRotation((r) => r - 90)}
-                    disabled={stage === "saving"}
-                  >
-                    <RotateCcw className="mr-1.5 h-4 w-4" /> Left
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => setRotation((r) => r + 90)}
-                    disabled={stage === "saving"}
-                  >
-                    <RotateCw className="mr-1.5 h-4 w-4" /> Right
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={enterCrop}
-                    disabled={stage === "saving"}
-                  >
-                    <CropIcon className="mr-1.5 h-4 w-4" /> Crop
-                  </Button>
-                </div>
-
-                {/* Auto-straighten notice: shown when the captured image was
-                    perspective-corrected, with a one-tap undo to the original. */}
-                {autoCorrected && (
-                  <div className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-primary/40 bg-primary/10 px-3 py-2">
-                    <span className="flex items-center gap-2 text-xs font-medium text-primary">
-                      <Sparkles className="h-4 w-4 shrink-0" />
-                      {showingOriginal
-                        ? "Showing the original photo"
-                        : "Edges detected and straightened"}
-                    </span>
-                    {showingOriginal ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 shrink-0 px-2 text-xs text-primary hover:text-primary"
-                        onClick={useCorrectedImage}
-                        disabled={stage === "saving"}
-                      >
-                        <ScanLine className="mr-1 h-3.5 w-3.5" /> Use auto-cropped
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 shrink-0 px-2 text-xs text-primary hover:text-primary"
-                        onClick={useOriginalImage}
-                        disabled={stage === "saving"}
-                      >
-                        <Undo2 className="mr-1 h-3.5 w-3.5" /> Use original
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {/* Added pages strip */}
-                {pages.length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Pages in this document ({pages.length + 1})
-                    </Label>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {pages.map((p, i) => (
-                        <div key={i} className="relative shrink-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={p.dataUrl}
-                            alt={`Page ${i + 1}`}
-                            className="h-16 w-12 rounded border border-border object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removePage(i)}
-                            disabled={stage === "saving"}
-                            aria-label={`Remove page ${i + 1}`}
-                            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                      <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-primary text-primary">
-                        <span className="text-[10px] font-medium">Now</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="docName">Document name</Label>
-              <Input
-                id="docName"
-                value={docName}
-                onChange={(e) => setDocName(e.target.value)}
-                placeholder="e.g. Passport"
-                disabled={stage === "saving"}
+      {/* Details card: one question per step with Back and Next, kept short so
+          the scan above stays in view. The last step's button saves. */}
+      {(stage === "edit" || stage === "saving") && !cropping && currentStep && (
+        <div className="relative z-10 shrink-0 rounded-t-[var(--radius-lg)] bg-card px-5 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-4 shadow-[0_-6px_16px_rgba(0,0,0,0.25)]">
+          <div className="mb-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="truncate text-base font-semibold text-foreground">{currentStep.title}</h2>
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                Step {stepIndex + 1} of {detailSteps.length}
+              </span>
+            </div>
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="gold-surface h-full rounded-full transition-all duration-300"
+                style={{ width: `${((stepIndex + 1) / detailSteps.length) * 100}%` }}
               />
             </div>
-
-            <div className="space-y-2">
-              <Label>Vault</Label>
-              <Select value={folderId} onValueChange={setFolderId} disabled={stage === "saving"}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a vault" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(folders ?? []).map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {(folders.find((f) => f.id === folderId)?.fields ?? []).map((field) => (
-              <div key={field.key} className="space-y-2">
-                <Label>{field.label}</Label>
-                {field.type === "select" ? (
-                  <Select
-                    value={metaValues[field.key] ?? ""}
-                    onValueChange={(v) => setMetaValues((prev) => ({ ...prev, [field.key]: v }))}
-                    disabled={stage === "saving"}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={`Choose ${field.label.toLowerCase()}`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(field.options ?? []).map((opt) => (
-                        <SelectItem key={opt} value={opt}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
-                    value={metaValues[field.key] ?? ""}
-                    onChange={(e) =>
-                      setMetaValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                    placeholder={field.type === "text" ? field.label : undefined}
-                    disabled={stage === "saving"}
-                  />
-                )}
-              </div>
-            ))}
-
-            {!pdfFile && (
-              <>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="flex items-center gap-1.5">
-                      <Sun className="h-4 w-4" /> Brightness
-                    </Label>
-                    <span className="font-mono text-xs text-muted-foreground">{brightness}%</span>
-                  </div>
-                  <Slider
-                    value={[brightness]}
-                    min={50}
-                    max={150}
-                    step={1}
-                    onValueChange={(v) => setBrightness(v?.[0] ?? 100)}
-                    disabled={stage === "saving"}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="flex items-center gap-1.5">
-                      <Contrast className="h-4 w-4" /> Contrast
-                    </Label>
-                    <span className="font-mono text-xs text-muted-foreground">{contrast}%</span>
-                  </div>
-                  <Slider
-                    value={[contrast]}
-                    min={50}
-                    max={150}
-                    step={1}
-                    onValueChange={(v) => setContrast(v?.[0] ?? 100)}
-                    disabled={stage === "saving"}
-                  />
-                </div>
-
-                {/* Save format */}
-                <button
-                  type="button"
-                  disabled={totalPages > 1 || stage === "saving"}
-                  onClick={() => setSaveAsPdf((v) => !v)}
-                  className="flex w-full items-center justify-between rounded-[var(--radius)] border border-border px-3 py-2.5 text-left disabled:opacity-70"
-                >
-                  <span className="text-sm">
-                    Save as PDF
-                    {totalPages > 1 && (
-                      <span className="ml-1 text-xs text-muted-foreground">(multi-page)</span>
-                    )}
-                  </span>
-                  <span
-                    className={`flex h-5 w-9 items-center rounded-full px-0.5 transition ${
-                      willBePdf ? "justify-end bg-primary" : "justify-start bg-muted"
-                    }`}
-                  >
-                    <span className="h-4 w-4 rounded-full bg-white shadow" />
-                  </span>
-                </button>
-
-                {/* Preview thumbnail chooser */}
-                <div className="flex items-center justify-between rounded-[var(--radius)] border border-border px-3 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-9 items-center justify-center overflow-hidden rounded border border-border bg-muted">
-                      {thumbUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={thumbUrl} alt="Preview thumbnail" className="h-full w-full object-cover" />
-                      ) : (
-                        <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-sm">Preview thumbnail</p>
-                      <p className="text-xs text-muted-foreground">
-                        {thumbUrl ? "Custom preview set" : "Whole page used by default"}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={openThumbDialog}
-                    disabled={stage === "saving" || thumbBusy}
-                    className="text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
-                  >
-                    {thumbUrl ? "Change" : "Set preview thumbnail"}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {pdfFile ? (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={backToChooser}
-                disabled={stage === "saving"}
-              >
-                <RotateCcw className="mr-2 h-4 w-4" /> Choose a different source
-              </Button>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <Button variant="outline" onClick={retake} disabled={stage === "saving"}>
-                  <RotateCcw className="mr-2 h-4 w-4" /> Retake
-                </Button>
-                <Button variant="outline" onClick={addPage} disabled={stage === "saving"}>
-                  <Plus className="mr-2 h-4 w-4" /> Add page
-                </Button>
-              </div>
-            )}
-            <Button className="w-full" size="lg" onClick={save} disabled={stage === "saving"}>
-              {stage === "saving" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <Check className="mr-2 h-4 w-4" /> Save document
-                </>
-              )}
+          </div>
+          <div
+            key={currentStep.key}
+            className="max-h-[34vh] min-h-[4.5rem] space-y-3 overflow-y-auto overscroll-contain px-0.5 py-1.5"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                e.preventDefault();
+                goNextStep();
+              }
+            }}
+          >
+            {currentStep.body}
+          </div>
+          <div className="mt-4 grid grid-cols-[auto_1fr] gap-3">
+            <Button
+              variant="outline"
+              className="h-12 px-4"
+              onClick={() => setDetailStep(Math.max(0, stepIndex - 1))}
+              disabled={stepIndex === 0 || stage === "saving"}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
+            {isLastStep ? (
+              <button
+                type="button"
+                onClick={save}
+                disabled={stage === "saving"}
+                className="gold-surface flex h-12 w-full items-center justify-center rounded-[var(--radius)] text-base font-semibold text-primary-foreground shadow-md transition active:scale-[0.99] disabled:opacity-70 no-select"
+              >
+                {stage === "saving" ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <Check className="mr-2 h-5 w-5" /> Save document
+                  </>
+                )}
+              </button>
+            ) : (
+              <Button className="h-12" onClick={goNextStep} disabled={stage === "saving"}>
+                Next <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -1951,63 +2204,23 @@ export function ScannerScreen({
           <DialogHeader>
             <DialogTitle>Set preview thumbnail</DialogTitle>
             <DialogDescription>
-              Drag the frame to choose the part of the document shown on its vault
-              tile. Use the slider to change how much is included.
+              Pinch to zoom and drag to choose the part of the document shown on
+              its vault tile.
             </DialogDescription>
           </DialogHeader>
 
+          {thumbImgUrl && (
+            <ThumbFramer src={thumbImgUrl} rectRef={thumbRectRef} resetRef={thumbResetRef} />
+          )}
           <div className="flex justify-center">
-            <div className="relative inline-block">
-              {thumbImgUrl && (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={thumbImgUrl}
-                    alt="Document to frame"
-                    className="block max-h-[50vh] max-w-full rounded-[var(--radius)]"
-                  />
-                  <div
-                    ref={thumbLayerRef}
-                    className="absolute inset-0 touch-none"
-                    onPointerMove={onThumbPointerMove}
-                    onPointerUp={onThumbPointerUp}
-                    onPointerLeave={onThumbPointerUp}
-                  >
-                    {thumbFrame && (
-                      <div
-                        className="absolute border-2 border-primary"
-                        style={{
-                          left: `${thumbFrame.x * 100}%`,
-                          top: `${thumbFrame.y * 100}%`,
-                          width: `${thumbFrame.w * 100}%`,
-                          height: `${thumbFrame.h * 100}%`,
-                          boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)",
-                          touchAction: "none",
-                        }}
-                        onPointerDown={startThumbDrag}
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Frame size</Label>
-              <span className="font-mono text-xs text-muted-foreground">
-                {Math.round(thumbSize * 100)}%
-              </span>
-            </div>
-            <Slider
-              value={[thumbSize]}
-              min={0.3}
-              max={1}
-              step={0.05}
-              onValueChange={(v) => onThumbSizeChange(v?.[0] ?? 1)}
+            <button
+              type="button"
+              onClick={() => thumbResetRef.current?.()}
               disabled={thumbBusy}
-            />
+              className="text-xs text-muted-foreground underline"
+            >
+              Reset framing
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-1">
@@ -2020,6 +2233,33 @@ export function ScannerScreen({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Leaving with an unsaved scan */}
+      <AlertDialog
+        open={exitOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setExitOpen(false);
+            pendingExitRef.current = null;
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to exit?</AlertDialogTitle>
+            <AlertDialogDescription>Your unsaved changes will be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmExit}
+            >
+              Exit
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/*
         Accept lists are plain MIME types with no bare file extensions. On

@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Custom vaults start with a sensible generic field set which the owner can
-    // fully customise later with the field builder.
+    // fully customize later with the field builder.
     const folder = await prisma.folder.create({
       data: { userId, name, icon, isDefault: false, fields: getGenericFields() as any },
     });

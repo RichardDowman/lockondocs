@@ -205,7 +205,7 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
               className="flex flex-col items-start rounded-[var(--radius-lg)] bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md active:scale-[0.98] no-select"
             >
               <div className="gold-tile mb-3 flex h-11 w-11 items-center justify-center rounded-[var(--radius)] text-accent-foreground">
-                <FolderIcon name={folder.icon} className="h-5 w-5" />
+                <FolderIcon name={folder.icon} className="h-5 w-5" imageClassName="h-10 w-10" />
               </div>
               <p className="line-clamp-1 font-medium text-foreground">{folder.name}</p>
               <p className="text-xs text-muted-foreground">
@@ -286,7 +286,7 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
                         : "bg-accent text-muted-foreground hover:text-primary",
                     )}
                   >
-                    <FolderIcon name={icon} className="h-5 w-5" />
+                    <FolderIcon name={icon} className="h-5 w-5" imageClassName="h-9 w-9" />
                   </button>
                 ))}
               </div>

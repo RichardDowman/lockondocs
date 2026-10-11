@@ -31,7 +31,7 @@ function formatDate(value: Date | string | null | undefined): string {
   if (!value) return "-";
   const d = new Date(value);
   if (isNaN(d.getTime())) return "-";
-  return d.toLocaleString("en-GB", {
+  return d.toLocaleString("en-US", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -182,7 +182,7 @@ export async function GET(req: NextRequest) {
     const generatedAt = formatDate(new Date());
 
     const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="en-US">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

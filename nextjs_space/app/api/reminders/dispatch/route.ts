@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     );
     const base = baseUrl() || "https://vault.lockondocs.app";
 
-    const dateFmt = new Intl.DateTimeFormat("en-GB", {
+    const dateFmt = new Intl.DateTimeFormat("en-US", {
       day: "numeric",
       month: "long",
       year: "numeric",

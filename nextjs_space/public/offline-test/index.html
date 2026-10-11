@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>LockonDocs offline test</title>
+<link rel="manifest" href="/offline-test/manifest.json">
+<link rel="apple-touch-icon" href="/offline-test/icon-180.png">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vault test">
+<script>
+  // Chrome offers its install prompt once per page; keep it for the toggle.
+  window.__installPrompt = null;
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); window.__installPrompt = e; document.dispatchEvent(new Event("installready")); });
+</script>
+<style>
+  body { font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; margin: 0; padding: 16px; background: #0f172a; color: #e2e8f0; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 16px; color: #94a3b8; font-size: 14px; }
+  .verdict { border-radius: 12px; padding: 14px; font-weight: 700; font-size: 17px; margin-bottom: 14px; }
+  .ok { background: #14532d; color: #dcfce7; }
+  .warn { background: #713f12; color: #fef9c3; }
+  .bad { background: #7f1d1d; color: #fee2e2; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 14px; }
+  td { padding: 7px 4px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+  td:first-child { color: #94a3b8; width: 46%; }
+  button { display: block; width: 100%; padding: 13px; margin: 8px 0; border: 0; border-radius: 10px; font-size: 16px; font-weight: 600; background: #d4a72c; color: #111; }
+  button.secondary { background: #334155; color: #e2e8f0; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #020617; padding: 10px; border-radius: 8px; font-size: 12px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; }
+  .card { background: #1e293b; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .switch-row strong { font-size: 16px; }
+  .card p { margin: 6px 0 0; color: #94a3b8; font-size: 14px; }
+  .switch { position: relative; width: 52px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #475569; border-radius: 30px; transition: background .2s; }
+  .slider:before { content: ""; position: absolute; width: 24px; height: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; }
+  .switch input:checked + .slider { background: #d4a72c; }
+  .switch input:checked + .slider:before { transform: translateX(22px); }
+  #sheet { display: none; margin-top: 12px; border-top: 1px solid #334155; padding-top: 12px; }
+  #sheet h3 { font-size: 16px; margin: 0 0 6px; }
+  #sheet ol { margin: 8px 0; padding-left: 22px; font-size: 15px; line-height: 1.5; }
+  #sheet .note { color: #fde68a; font-size: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>LockonDocs offline test</h1>
+<p class="sub">Test page only. It holds no documents and no personal data.</p>
+
+<div class="card">
+  <div class="switch-row">
+    <div><strong>Offline vault</strong></div>
+    <label class="switch"><input type="checkbox" id="offlineToggle" aria-label="Offline vault"><span class="slider"></span></label>
+  </div>
+  <p>Keep a secure copy on this phone so the vault opens with no signal. It uses the same account as your app, and anything you do offline is sent to your account the next time you are online.</p>
+  <div id="sheet"></div>
+</div>
+
+<div id="verdict" class="verdict warn">Running checks...</div>
+<table id="results"></table>
+
+<button id="open">Open in in-app browser</button>
+<button id="rerun" class="secondary">Run checks again</button>
+<button id="copy" class="secondary">Copy results</button>
+<button id="reset" class="secondary">Reset test (clear everything)</button>
+
+<h2>Run history on this phone</h2>
+<pre id="history">-</pre>
+
+<script>
+(function () {
+  var DB = "lockondocs-offline-test";
+  var rows = [];
+  var report = {};
+  var ua = navigator.userAgent;
+  var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var isAndroid = /Android/.test(ua);
+  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  var androidWebView = isAndroid && (/; wv\)/.test(ua) || /Version\/\d+\.\d+ Chrome/.test(ua));
+  var iosSafari = isIOS && /Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|GSA|FBAN|FBAV|Instagram|Line\//.test(ua);
+  var params = new URLSearchParams(location.search);
+  var installUrl = location.origin + "/offline-test/index.html?offline=on";
+
+  function platformLabel() {
+    if (standalone) return isIOS ? "iPhone home screen app" : isAndroid ? "Android home screen app" : "Installed app";
+    if (isIOS) return iosSafari ? "iPhone Safari" : "iPhone in-app browser or other browser";
+    if (isAndroid) return androidWebView ? "Android in-app browser (WebView)" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : "Android Chrome or other browser";
+    return "Computer browser";
+  }
+
+  function row(label, value) { rows.push([label, value]); report[label] = value; }
+  function render() {
+    var t = document.getElementById("results");
+    t.innerHTML = "";
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      var a = document.createElement("td"); a.textContent = r[0];
+      var b = document.createElement("td"); b.textContent = r[1];
+      tr.appendChild(a); tr.appendChild(b); t.appendChild(tr);
+    });
+  }
+  function fmt(d) {
+    return new Date(d).toLocaleString("en-US", { month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
+  function withTimeout(p, ms) {
+    return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timed out")); }, ms); })]);
+  }
+
+  function openDb() {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function get(db, key) {
+    return new Promise(function (res, rej) {
+      var q = db.transaction("kv").objectStore("kv").get(key);
+      q.onsuccess = function () { res(q.result); };
+      q.onerror = function () { rej(q.error); };
+    });
+  }
+  function put(db, key, val) {
+    return new Promise(function (res, rej) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(val, key);
+      tx.oncomplete = function () { res(); };
+      tx.onerror = function () { rej(tx.error); };
+    });
+  }
+
+  async function run() {
+    rows = []; report = {};
+    var now = Date.now();
+    var embedded = false;
+    try { embedded = window.top !== window.self; } catch (e) { embedded = true; }
+    row("Time", fmt(now));
+    row("Shown inside an embed", embedded ? "Yes (inside GoodBarber section)" : "No (own window or in-app browser)");
+    row("Opened from home screen", standalone ? "Yes" : "No");
+    row("Platform", platformLabel());
+    row("Install prompt available", window.__installPrompt ? "Yes" : "No");
+
+    // 1. Real network check (never answered by the stored copy).
+    var network = false;
+    try {
+      var p = await withTimeout(fetch("/offline-test/ping.txt?t=" + now, { cache: "no-store" }), 5000);
+      network = p.ok;
+    } catch (e) { network = false; }
+    row("Internet reachable now", network ? "Yes" : "No");
+
+    // 2. Service worker (keeps the page on the phone).
+    var swSupported = "serviceWorker" in navigator;
+    var swActive = false, controlled = false, swError = "";
+    if (swSupported) {
+      try {
+        var reg = await withTimeout(navigator.serviceWorker.register("/offline-test/sw.js", { scope: "/offline-test/" }), 8000);
+        swActive = !!(reg.active || reg.waiting || reg.installing);
+        controlled = !!navigator.serviceWorker.controller;
+      } catch (e) { swError = String(e && e.message || e); }
+    }
+    row("Offline page support (service worker)", !swSupported ? "Not available in this browser" : swError ? "Blocked: " + swError : swActive ? "Installed" : "Not installed");
+    row("Page copy kept on phone", controlled ? "Yes" : "Not yet (reload once with signal)");
+
+    // 3. Encrypted record in the on-phone database.
+    var dbOk = false, recordOk = false, firstWritten = null, runs = [];
+    try {
+      var db = await openDb();
+      dbOk = true;
+      var key = await get(db, "key");
+      var rec = await get(db, "record");
+      if (!key || !rec) {
+        key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        var data = new TextEncoder().encode("LockonDocs offline test record");
+        var ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, data);
+        rec = { iv: iv, ct: ct, written: now };
+        await put(db, "key", key);
+        await put(db, "record", rec);
+      }
+      var pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: rec.iv }, key, rec.ct);
+      recordOk = new TextDecoder().decode(pt) === "LockonDocs offline test record";
+      firstWritten = rec.written;
+      runs = (await get(db, "runs")) || [];
+      runs.push({ t: now, net: network, ctl: controlled, emb: embedded, inst: standalone });
+      runs = runs.slice(-30);
+      await put(db, "runs", runs);
+    } catch (e) {
+      row("Database error", String(e && e.message || e));
+    }
+    row("On-phone database", dbOk ? "Available" : "Not available");
+    row("Encrypted test record readable", recordOk ? "Yes" : "No");
+    row("Record first saved", firstWritten ? fmt(firstWritten) : "-");
+
+    // 4. Storage that the phone promises to keep.
+    var persisted = "Not supported";
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        persisted = (await navigator.storage.persisted()) || (await navigator.storage.persist()) ? "Yes" : "No (phone may clear it when low on space)";
+      }
+    } catch (e) { persisted = "Error"; }
+    row("Storage kept permanently", persisted);
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        var est = await navigator.storage.estimate();
+        row("Storage available to the app", Math.round((est.quota || 0) / 1048576) + " MB");
+      }
+    } catch (e) {}
+    row("Browser", navigator.userAgent);
+
+    // Verdict.
+    var v = document.getElementById("verdict");
+    if (standalone && !network && controlled && recordOk) {
+      v.className = "verdict ok";
+      v.textContent = "PASS: installed vault opened from the home screen with no internet.";
+    } else if (standalone && network && controlled && recordOk) {
+      v.className = "verdict ok";
+      v.textContent = "Ready (installed): fully close this app, turn on Airplane Mode, then open it from the home screen icon.";
+    } else if (!network && controlled && recordOk) {
+      v.className = "verdict ok";
+      v.textContent = "PASS: opened with no internet and the saved record is still readable.";
+    } else if (network && controlled && recordOk) {
+      v.className = "verdict ok";
+      v.textContent = "Ready: page and record are saved on this phone. Now go offline and reopen.";
+    } else if (network && recordOk && swActive) {
+      v.className = "verdict warn";
+      v.textContent = "Almost: close this page and open it again once with signal, then go offline.";
+    } else if (recordOk && !swActive) {
+      v.className = "verdict warn";
+      v.textContent = "Partial: the phone can store data, but this browser cannot keep the page for offline opening.";
+    } else {
+      v.className = "verdict bad";
+      v.textContent = "FAIL: this browser does not allow offline storage here.";
+    }
+    report.Verdict = v.textContent;
+    render();
+
+    document.getElementById("history").textContent = runs.length
+      ? runs.slice().reverse().map(function (r) {
+          return fmt(r.t) + "  internet: " + (r.net ? "yes" : "NO") + "  page on phone: " + (r.ctl ? "yes" : "no") + "  embed: " + (r.emb ? "yes" : "no") + "  installed: " + (r.inst ? "yes" : "no");
+        }).join("\n")
+      : "-";
+  }
+
+  // Offline vault switch (Build 42). Off by default; switching it on starts the home screen install.
+  var toggle = document.getElementById("offlineToggle");
+  var sheet = document.getElementById("sheet");
+  var STEPS_IOS = "<li>Tap the Share button (the square with an arrow).</li><li>Scroll down and tap <b>Add to Home Screen</b>, then tap <b>Add</b>.</li><li>Open the vault from the new <b>Vault test</b> icon on your home screen.</li>";
+
+  function saveFlag(on) { openDb().then(function (db) { return put(db, "offlineOn", !!on); }).catch(function () {}); }
+  function loadFlag() { return openDb().then(function (db) { return get(db, "offlineOn"); }).catch(function () { return false; }); }
+  function setSheet(html) { sheet.innerHTML = html; sheet.style.display = "block"; }
+  function hideSheet() { sheet.innerHTML = ""; sheet.style.display = "none"; }
+  function bind(id, fn) { var b = document.getElementById(id); if (b) b.onclick = fn; }
+  function note(text) { var n = document.getElementById("jumpNote"); if (n) { n.textContent = text; n.style.display = "block"; } }
+  function copyLink() {
+    var done = function () { note("Link copied. Paste it into the address bar of " + (isIOS ? "Safari" : "Chrome") + "."); };
+    if (navigator.clipboard) navigator.clipboard.writeText(installUrl).then(done, function () { prompt("Copy this link:", installUrl); });
+    else prompt("Copy this link:", installUrl);
+  }
+  function jumpOut(url, browser) {
+    location.href = url;
+    setTimeout(function () {
+      if (document.visibilityState === "visible") note("If " + browser + " did not open, tap Copy link and paste it into " + browser + ".");
+    }, 1800);
+  }
+  function installedMessage() {
+    setSheet("<h3>Offline vault added</h3><p>Close this page and open the vault from the new <b>Vault test</b> icon on your home screen. Open it once with signal until it says Ready.</p>");
+  }
+
+  function showSheet() {
+    var copyBtn = "<button id=\"copyLink\" class=\"secondary\">Copy link</button><p id=\"jumpNote\" class=\"note\" style=\"display:none\"></p>";
+    if (standalone) {
+      setSheet("<h3>Offline vault is on for this phone</h3><p>You opened the vault from the home screen. Once the check below says Ready, it will open with no internet.</p>");
+      return;
+    }
+    if (window.__installPrompt) {
+      setSheet("<h3>Install your offline vault</h3><p>Adds the vault to your home screen. It uses the same account as your app.</p><button id=\"doInstall\">Install offline vault</button>");
+      bind("doInstall", function () {
+        var p = window.__installPrompt;
+        if (!p) { showSheet(); return; }
+        p.prompt();
+        p.userChoice.then(function (c) {
+          window.__installPrompt = null;
+          if (c && c.outcome === "accepted") installedMessage(); else showSheet();
+        }, function () { showSheet(); });
+      });
+      return;
+    }
+    if (isAndroid && androidWebView) {
+      setSheet("<h3>Install your offline vault</h3><p>Installing needs Chrome. Tap below to open this page in Chrome, where the install starts right away.</p><button id=\"goChrome\">Open in Chrome</button>" + copyBtn);
+      bind("goChrome", function () {
+        jumpOut("intent://" + location.host + "/offline-test/index.html?offline=on#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" + encodeURIComponent(installUrl) + ";end", "Chrome");
+      });
+      bind("copyLink", copyLink);
+      return;
+    }
+    if (isAndroid) {
+      setSheet("<h3>Install your offline vault</h3><ol><li>Tap the menu (three dots) at the top right.</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li><li>Open the vault from the new <b>Vault test</b> icon on your home screen.</li></ol><p>In Samsung Internet: tap the menu, then <b>Add page to</b>, then <b>Home screen</b>.</p>" + copyBtn);
+      bind("copyLink", copyLink);
+      return;
+    }
+    if (isIOS && !iosSafari) {
+      setSheet("<h3>Install your offline vault</h3><p>On iPhone the vault is added to the home screen from Safari.</p><button id=\"goSafari\">Open in Safari</button>" + copyBtn + "<ol><li>If Safari did not open, open Safari and paste the link into the address bar.</li>" + STEPS_IOS + "</ol>");
+      bind("goSafari", function () { jumpOut("x-safari-" + installUrl, "Safari"); });
+      bind("copyLink", copyLink);
+      return;
+    }
+    if (iosSafari) {
+      setSheet("<h3>Install your offline vault</h3><ol>" + STEPS_IOS + "</ol><p class=\"note\">If you do not see Add to Home Screen, tap the Safari compass icon first to open this page in full Safari.</p>");
+      return;
+    }
+    setSheet("<h3>Install your offline vault</h3><p>Open this page on your phone to install it. On a computer, use the install icon in the address bar if your browser shows one.</p>");
+  }
+
+  toggle.onchange = function () {
+    saveFlag(toggle.checked);
+    if (toggle.checked) showSheet(); else hideSheet();
+  };
+  document.addEventListener("installready", function () {
+    report["Install prompt available"] = "Yes";
+    rows.forEach(function (r) { if (r[0] === "Install prompt available") r[1] = "Yes"; });
+    render();
+    if (toggle.checked) showSheet();
+  });
+  window.addEventListener("appinstalled", function () { window.__installPrompt = null; if (toggle.checked) installedMessage(); });
+  loadFlag().then(function (on) {
+    if (params.get("offline") === "on" || standalone) { on = true; saveFlag(true); }
+    toggle.checked = !!on;
+    if (on) showSheet();
+  });
+
+  document.getElementById("rerun").onclick = run;
+  document.getElementById("open").onclick = function () {
+    var url = location.origin + "/offline-test/index.html";
+    var w = window.open(url, "_blank", "noopener,noreferrer");
+    if (!w) { try { window.top.location.href = url; } catch (e) { location.href = url; } }
+  };
+  document.getElementById("copy").onclick = function () {
+    var text = Object.keys(report).map(function (k) { return k + ": " + report[k]; }).join("\n") +
+      "\n\nHistory:\n" + document.getElementById("history").textContent;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function () { alert("Results copied."); }, function () { alert("Copy blocked here. Please take a screenshot instead."); });
+    } else { alert("Copy blocked here. Please take a screenshot instead."); }
+  };
+  document.getElementById("reset").onclick = async function () {
+    if (!confirm("Clear the test data and the saved page from this phone?")) return;
+    try {
+      var regs = await navigator.serviceWorker.getRegistrations();
+      for (var i = 0; i < regs.length; i++) { if (regs[i].scope.indexOf("/offline-test/") !== -1) await regs[i].unregister(); }
+      var keys = await caches.keys();
+      for (var j = 0; j < keys.length; j++) { if (keys[j].indexOf("lockondocs-offline-test") === 0) await caches.delete(keys[j]); }
+    } catch (e) {}
+    indexedDB.deleteDatabase(DB);
+    alert("Cleared. Close this page to finish.");
+  };
+
+  window.addEventListener("error", function (e) { console.error("Offline test error:", e.message); });
+  run();
+})();
+</script>
+</body>
+</html>

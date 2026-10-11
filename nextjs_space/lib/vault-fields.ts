@@ -3,7 +3,7 @@
 // Every vault carries a small set of "fields" - typed inputs shown when a
 // document is saved into that vault and displayed on the document screen.
 // Default vaults are seeded with a tailored set below; custom vaults start
-// with a sensible generic set and can be fully customised with the field
+// with a sensible generic set and can be fully customized with the field
 // builder. The captured values live on Document.metadata, and a lowercase
 // concatenation of the name plus every value is stored on Document.searchText
 // so search can match across all fields, not just the document name.
@@ -49,7 +49,7 @@ const DEFAULT_VAULT_FIELDS: Record<string, FieldDef[]> = {
       type: "select",
       options: [
         "Passport",
-        "Driver's licence",
+        "Driver's license",
         "National ID",
         "Birth certificate",
         "Social security",
@@ -108,11 +108,11 @@ const DEFAULT_VAULT_FIELDS: Record<string, FieldDef[]> = {
       key: "document_type",
       label: "Document type",
       type: "select",
-      options: ["Diploma", "Certificate", "Transcript", "Licence", "Other"],
+      options: ["Diploma", "Certificate", "Transcript", "License", "Other"],
     },
     {
       key: "issuing_organization",
-      label: "Issuing organisation",
+      label: "Issuing organization",
       type: "text",
     },
     { key: "field_subject", label: "Field or subject", type: "text" },
@@ -222,7 +222,7 @@ export function getGenericFields(): FieldDef[] {
   return GENERIC_FIELDS.map((f) => ({ ...f }));
 }
 
-// Normalises an arbitrary value into a valid FieldDef array (used when reading
+// Normalizes an arbitrary value into a valid FieldDef array (used when reading
 // the Json column, which Prisma types as `unknown`). Invalid entries are
 // dropped so the UI never renders a broken field.
 export function coerceFieldDefs(raw: unknown): FieldDef[] {
@@ -257,7 +257,7 @@ export function coerceFieldDefs(raw: unknown): FieldDef[] {
 
 // Keeps only values whose keys exist in the vault's field definitions, coerces
 // them to trimmed strings, and drops empties. This is the authoritative
-// sanitiser used by the document write APIs.
+// sanitizer used by the document write APIs.
 export function sanitizeMetadata(
   raw: unknown,
   fields: FieldDef[],
@@ -311,7 +311,7 @@ export function getExpiryFieldKey(fields: FieldDef[]): string | null {
 }
 
 // Identifies vault fields whose values are sensitive enough to hide behind a
-// re-authentication step on the document screen (ID numbers, passport / licence
+// re-authentication step on the document screen (ID numbers, passport / license
 // numbers, VINs, usernames, patient names, account numbers, and similar). Only
 // free-text and number fields are ever masked; dates and select values are not
 // considered sensitive on their own. Matching is deliberately conservative so

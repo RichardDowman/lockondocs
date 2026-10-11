@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { rememberOfflinePassword } from "@/lib/offline/vault-store";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -37,10 +38,17 @@ export function LoginForm() {
       // always readable immediately, so navigating straight to /home can bounce
       // the user back to /login. Poll getSession until the cookie is committed,
       // THEN do a full-document navigation so the cookie is sent on the request.
+      let userId = "";
       for (let i = 0; i < 15; i++) {
         const session = await getSession();
-        if ((session?.user as any)?.id) break;
+        userId = (session?.user as any)?.id ?? "";
+        if (userId) break;
         await new Promise((r) => setTimeout(r, 200));
+      }
+      // Offline vault: key this phone's encrypted copy to the proven password.
+      // No-op unless the Offline vault setting is on here.
+      if (userId) {
+        await rememberOfflinePassword(password, userId, email.trim().toLowerCase());
       }
       // Use replace (not assign) so signing in does not leave an extra /login
       // entry in history. Inside the GoodBarber in-app browser this means a

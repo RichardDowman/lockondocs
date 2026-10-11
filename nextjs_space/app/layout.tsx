@@ -17,15 +17,20 @@ const siteUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: 'LockonDocs',
-  description: 'Securely scan, organise and store your personal documents.',
+  description: 'Securely scan, organize and store your personal documents.',
   icons: {
     icon: '/logo.png',
     shortcut: '/logo.png',
-    apple: '/logo.png',
+    apple: '/icons/apple-icon-180.png',
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'LockonDocs',
+    statusBarStyle: 'default',
   },
   openGraph: {
     title: 'LockonDocs',
-    description: 'Securely scan, organise and store your personal documents.',
+    description: 'Securely scan, organize and store your personal documents.',
     images: ['/og-image.png'],
   },
 }
@@ -44,9 +49,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-US" suppressHydrationWarning>
       <head>
         <script src="https://apps.abacus.ai/chatllm/appllm-lib.js"></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__ldInstallPrompt=e;window.dispatchEvent(new Event('ld-installready'));});",
+          }}
+        />
       </head>
       <body suppressHydrationWarning className={`${dmSans.variable} ${jakartaSans.variable} ${jetbrainsMono.variable} font-sans`}>
         <ThemeProvider

@@ -15,8 +15,10 @@ import {
   FileText,
   Eye,
   EyeOff,
+  Maximize2,
 } from "lucide-react";
 import { FolderIcon } from "@/components/app/folder-icon";
+import { ZoomViewer } from "@/components/app/zoom-viewer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -81,7 +83,7 @@ function formatFieldValue(field: FieldDef, value: string): string {
   if (field.type === "date") {
     const d = new Date(value);
     if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString("en-GB", {
+      return d.toLocaleDateString("en-US", {
         timeZone: "UTC",
         day: "2-digit",
         month: "short",
@@ -105,6 +107,8 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Full-screen pinch-zoom reader for image scans.
+  const [zoomOpen, setZoomOpen] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -353,6 +357,9 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
         </div>
       ) : (
         <>
+          {zoomOpen && !isPdf && previewUrl && (
+            <ZoomViewer src={previewUrl} alt={doc.name} onClose={() => setZoomOpen(false)} />
+          )}
           <div className="mb-4 overflow-hidden rounded-[var(--radius-lg)] bg-card p-2 shadow-sm">
             {isPdf ? (
               <iframe
@@ -361,16 +368,27 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
                 className="h-[70vh] w-full rounded-[var(--radius)] border-0 bg-muted"
               />
             ) : (
-              <div className="relative flex min-h-[300px] w-full items-center justify-center overflow-hidden rounded-[var(--radius)] bg-muted">
-                {/* object-contain keeps the full image visible and preserves its
-                    aspect ratio, so a landscape scan is never squashed. */}
+              <button
+                type="button"
+                onClick={() => setZoomOpen(true)}
+                aria-label="Open the page full screen to zoom in"
+                className="relative block h-[60vh] min-h-[300px] w-full overflow-hidden rounded-[var(--radius)] bg-muted"
+              >
+                {/* The picture is pinned to a fixed box and letterboxed with
+                    object-contain, so the whole saved page (or the crop the
+                    user chose) is always shown, never enlarged or cut off.
+                    Sizing it as a flex item let some mobile browsers grow
+                    the full-resolution scan past the box. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewUrl}
                   alt={doc.name}
-                  className="h-auto max-h-[70vh] w-full object-contain"
+                  className="absolute inset-0 h-full w-full object-contain"
                 />
-              </div>
+                <span className="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white">
+                  <Maximize2 className="h-3.5 w-3.5" /> Tap to zoom
+                </span>
+              </button>
             )}
           </div>
 

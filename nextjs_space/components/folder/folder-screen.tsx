@@ -324,7 +324,7 @@ export function FolderScreen({ folderId }: { folderId: string }) {
         <>
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-[var(--radius)] gold-tile text-accent-foreground">
-              <FolderIcon name={folder?.icon} className="h-6 w-6" />
+              <FolderIcon name={folder?.icon} className="h-6 w-6" imageClassName="h-11 w-11" />
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="font-display text-2xl font-bold tracking-tight">
@@ -451,7 +451,7 @@ export function FolderScreen({ folderId }: { folderId: string }) {
                         : "bg-accent text-muted-foreground hover:text-primary",
                     )}
                   >
-                    <FolderIcon name={icon} className="h-5 w-5" />
+                    <FolderIcon name={icon} className="h-5 w-5" imageClassName="h-9 w-9" />
                   </button>
                 ))}
               </div>

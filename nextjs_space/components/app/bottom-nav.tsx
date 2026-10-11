@@ -23,8 +23,8 @@ export function BottomNav() {
     );
 
   return (
-    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-md -translate-x-1/2 safe-bottom">
-      <div className="relative mx-3 mb-3 flex items-center justify-between rounded-[var(--radius-lg)] bg-card/95 px-2 py-2.5 shadow-lg backdrop-blur-md">
+    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-md -translate-x-1/2 border-t border-border bg-card shadow-[0_-4px_16px_rgba(0,0,0,0.06)] safe-bottom">
+      <div className="relative flex items-center justify-between px-2 pb-2 pt-2.5">
         <Link href="/home" className={itemClass(isHome)}>
           <LayoutGrid className="h-5 w-5" />
           Vaults

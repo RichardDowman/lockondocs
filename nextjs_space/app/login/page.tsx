@@ -30,7 +30,7 @@ export default async function LoginPage() {
           LockonDocs
         </h1>
         <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-          Sign in to scan, organise and securely store your documents.
+          Sign in to scan, organize and securely store your documents.
         </p>
       </div>
       <Card className="w-full max-w-sm shadow-lg">

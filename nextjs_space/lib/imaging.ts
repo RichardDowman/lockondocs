@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 
 export interface CropRect {
-  // Normalised (0..1) relative to the rotated image.
+  // Normalized (0..1) relative to the rotated image.
   x: number;
   y: number;
   w: number;
@@ -37,7 +37,7 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
 export async function renderProcessedPage(
   img: HTMLImageElement,
   edit: PageEdit,
-  quality = 0.9,
+  quality = 0.93,
 ): Promise<ProcessedPage> {
   const rot = (((edit.rotation ?? 0) % 360) + 360) % 360;
   const iw = img.naturalWidth || img.width;

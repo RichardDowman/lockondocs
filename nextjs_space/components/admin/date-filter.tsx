@@ -28,7 +28,7 @@ const PRESETS: { key: RangeKey; label: string }[] = [
   { key: "all", label: "All time" },
 ];
 
-// Serialise the current filter into query-string params for the admin APIs.
+// Serialize the current filter into query-string params for the admin APIs.
 export function dateFilterParams(value: DateFilterValue): Record<string, string> {
   const params: Record<string, string> = { range: value.key };
   if (value.key === "custom") {

@@ -19,7 +19,7 @@ The Phase 1 build is a solid, secure foundation:
 
 - **Authentication:** email and password, bcrypt-hashed passwords, JWT sessions via the auth layer.
 - **Per-user isolation:** every data route (documents, folders, presigned upload) reads the user from the session, rejects unauthenticated calls with 401, and re-verifies folder ownership before attaching a document. No cross-user access path was found.
-- **Storage:** documents are stored privately in S3 and served only through short-lived signed URLs (1 hour). SVG inline rendering is blocked (script-injection defence) and filenames are sanitised.
+- **Storage:** documents are stored privately in S3 and served only through short-lived signed URLs (1 hour). SVG inline rendering is blocked (script-injection defense) and filenames are sanitized.
 - **Data model:** users, folders, documents with soft-delete on the user, storage tracking, and sensible indexes.
 - **GoodBarber embed:** the app loads in the embed, and the landing screen's "Access My Vault" breaks out to a top-level browser context so login cookies work first-party. Confirmed working by the client.
 
@@ -38,9 +38,9 @@ Server-side encryption at rest is active. Application-level (envelope) encryptio
 Added in Build 31 as the Phase C security bundle. These are access controls on the running app, not encryption; they reduce the risk of an unlocked or left-open phone exposing documents inside the GoodBarber shell.
 
 - **Auto-lock.** The vault locks after a period of inactivity, and also locks on return if the app has been left in the background for at least that same period (changed in Build 34: it previously locked on any return from the background, however brief). The timeout is a per-user setting (1, 3, 5 or 10 minutes, or Never) defaulting to 5 minutes. The lock is a password overlay, not a sign-out, so the first-party session and cookies survive and unlocking is a single password step. The locked state is persisted on the device so a reload keeps the vault locked, and it is cleared whenever there is no signed-in user so a fresh sign-in never lands on the lock screen.
-- **Masked sensitive fields.** On a document's Details panel, sensitive values (ID, passport, licence, VIN, account, policy, username, patient name and similar) are masked by default and revealed only after a password step, and are re-masked automatically when the app is backgrounded. Only text and number fields whose names match a sensitive pattern are masked; ordinary descriptive fields stay visible.
+- **Masked sensitive fields.** On a document's Details panel, sensitive values (ID, passport, license, VIN, account, policy, username, patient name and similar) are masked by default and revealed only after a password step, and are re-masked automatically when the app is backgrounded. Only text and number fields whose names match a sensitive pattern are masked; ordinary descriptive fields stay visible.
 - **Re-authentication.** A dedicated endpoint re-checks the signed-in user's password for the unlock and reveal steps. It does not touch the login lockout counters (it confirms an already-authenticated user) and it records an audit entry for each success or failure.
-- Not included in this bundle and still open: document sharing, multi-person profiles, and application-level (envelope) encryption at rest (the last remains a deferred accepted risk, above).
+- Not included in this bundle and still open: document sharing, multi-person profiles, and application-level (envelope) encryption at rest (the last remains a deferred accepted risk, above). Sharing and offline access are reviewed in `sharing_offline_review.md` (Build 40).
 
 ## Phase 2 - Full Feature Build
 
@@ -78,16 +78,16 @@ Agreed price: £2,000 (~$2,540 USD). Scope below combines the proposal's Phase 2
 
 Agreed price: £500 (~$635 USD).
 
-- [ ] Confirm session behaviour on the new production URL
+- [ ] Confirm session behavior on the new production URL
 - [ ] Decide whether GoodBarber auth pass-through is wanted (if GoodBarber issues tokens)
-- [ ] Cross-origin and cookie behaviour pass on real iOS and Android devices
+- [ ] Cross-origin and cookie behavior pass on real iOS and Android devices
 - [ ] Confirm camera and scanning work through the production embed on real devices
 
 ## Phase 4 - Launch Prep (Optional)
 
 Agreed price: £300 (~$380 USD).
 
-- [ ] Performance optimisation pass
+- [ ] Performance optimization pass
 - [ ] Final security review
 - [ ] User acceptance testing with Tracey
 - [ ] Production go-live

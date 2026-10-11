@@ -38,7 +38,7 @@ function formatDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-GB", {
+  return d.toLocaleDateString("en-US", {
     timeZone: "UTC",
     day: "2-digit",
     month: "short",

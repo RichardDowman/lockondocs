@@ -34,9 +34,11 @@
 
 6. **Monetary references:** Always in GBP with USD conversion at ~1.27 rate. Example: £100 ($127 USD).
 
+7. **US English, always.** Every word a user or the client sees is US English: app screens, labels, buttons, messages, default vault fields and options, emails, the data export, page metadata, and client-facing docs and replies. Use US spellings (organize, color, center, license, behavior, canceled, gray, optimization, defense) and US date formats (en-US locale, M/D/YYYY, for example 10/6/2026). Set `lang="en-US"` on generated HTML. Never rename stored keys or database values just for spelling (for example a field key or a code identifier); change only what is displayed, and ask before any backfill of existing user data. The developer is UK-based, so check every new piece of text for UK spellings before a build is checkpointed. (Added in Build 40.)
+
 ### Build Tracking
 
-- **Build counter:** Track all builds in `build_state.md`. Current counter: 37.
+- **Build counter:** Track all builds in `build_state.md`. Current counter: 45.
 - **Prompt the user** to review/update `build_state.md` every 5 build updates.
 - `build_state.md` is **always additive** - never remove entries, only append new ones.
 
@@ -47,6 +49,7 @@ Feature docs live in `/docs/`:
 - `files.md` - Folder and file management
 - `admin.md` - Admin and settings
 - `production.md` - Production deployment, security posture and accepted risks
+- `sharing_offline_review.md` - Review of document sharing and offline access against the original planning (Build 40)
 
 Additional feature docs will be added as the project grows.
 
@@ -63,7 +66,7 @@ Additional feature docs will be added as the project grows.
 - Local caching of folder structure and recent documents.
 - Cloud sync when the device comes back online.
 - Graceful handling of offline state in the UI.
-- Note: offline capture, caching and sync are not implemented yet.
+- Note: offline capture, caching and sync are not implemented yet. Offline access was in Tracey's original requirements and the proposal's Phase 2; see `sharing_offline_review.md` for the gap and a suggested scope.
 
 ### Camera and Scanning
 
@@ -91,7 +94,7 @@ Additional feature docs will be added as the project grows.
 - Embed app in the GoodBarber shell, auth pass-through if applicable, session management inside the iframe, cross-origin testing and fixes.
 
 ### Phase 4 - Launch Prep (optional)
-- Performance optimisation, final security audit, user acceptance testing, production deployment.
+- Performance optimization, final security audit, user acceptance testing, production deployment.
 
 ## Client Architecture Phases (Digital Vault Architecture document)
 
@@ -105,7 +108,7 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 
 ### Phase C - Access security (built, Build 31)
 - Auto-lock (choices 1, 3, 5, 10 minutes or Never; default 5) that also locks on return when the app has been left in the background for at least that same period (Build 34 changed this from locking on any return), masked sensitive field values that require a password reveal, and a re-authentication endpoint. The lock is an in-app overlay, not a sign-out, so the GoodBarber session survives, and it is never shown straight after a sign-in.
-- Still open (need a separate go-ahead): document sharing, multi-person profiles, encryption at rest (accepted risk, not built).
+- Still open (need a separate go-ahead): document sharing, multi-person profiles, encryption at rest (accepted risk, not built). Sharing and offline access are reviewed in `sharing_offline_review.md` (Build 40).
 
 ## Key Contacts
 
@@ -124,5 +127,5 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 | Docs format | .md |
 | Currency | GBP (USD at ~1.27) |
 | Data sensitivity | High (PII, medical, school) |
-| Build counter | 37 |
+| Build counter | 45 |
 | Current phase | Phases 1 and 2 complete; client Phases A, B and C built (Builds 25 to 31); Phase 3 (GoodBarber) next |

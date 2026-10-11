@@ -43,6 +43,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { OfflineVaultCard } from "@/components/offline/offline-vault-card";
+import { wipeOfflineCopy } from "@/lib/offline/vault-store";
 
 interface Profile {
   name: string;
@@ -160,6 +162,7 @@ export function SettingsScreen() {
   }
 
   async function handleSignOut() {
+    await wipeOfflineCopy();
     await signOut({ redirect: false });
     router.replace("/login");
   }
@@ -209,6 +212,7 @@ export function SettingsScreen() {
         return;
       }
       toast.success("Your account and documents have been deleted.");
+      await wipeOfflineCopy();
       await signOut({ redirect: false });
       // replace so a back press cannot return to the deleted account's screens.
       window.location.replace("/login");
@@ -346,6 +350,8 @@ export function SettingsScreen() {
               </SelectContent>
             </Select>
           </div>
+
+          <OfflineVaultCard />
 
           {/* Security note */}
           <div className="flex items-start gap-3 rounded-[var(--radius-lg)] bg-accent/60 p-4">

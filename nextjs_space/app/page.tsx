@@ -17,7 +17,7 @@ export default async function RootPage() {
 
   const features = [
     { icon: ScanLine, label: "Scan documents" },
-    { icon: FolderLock, label: "Organise securely" },
+    { icon: FolderLock, label: "Organize securely" },
     { icon: ShieldCheck, label: "Private to you" },
   ];
 
@@ -38,7 +38,7 @@ export default async function RootPage() {
           LockonDocs
         </h1>
         <p className="mt-3 max-w-xs text-base leading-relaxed text-muted-foreground">
-          Your private vault to scan, organise and securely store the documents
+          Your private vault to scan, organize and securely store the documents
           that matter most.
         </p>
 

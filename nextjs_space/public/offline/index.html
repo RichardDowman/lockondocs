@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#b8902e">
+<link rel="apple-touch-icon" href="/icons/apple-icon-180.png">
+<title>LockonDocs</title>
+<style>
+  :root { --gold: #b8902e; --gold-dark: #29200f; --bg: #fdfcfa; --fg: #191d24; --muted: #6b7280; --card: #ffffff; --accent: #f6efe0; --danger: #c0392b; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { min-height: 100vh; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  .bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; font-size: 13px; background: var(--accent); color: var(--gold-dark); }
+  .bar button { border: 0; border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13px; background: var(--gold); color: var(--gold-dark); }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 20px 20px 40px; }
+  .center { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .logo { width: 72px; height: 72px; border-radius: 18px; }
+  h1 { font-size: 22px; margin: 16px 0 4px; }
+  h2 { font-size: 20px; margin: 4px 0 16px; }
+  p.sub { margin: 0; color: var(--muted); font-size: 14px; }
+  input[type=password] { width: 100%; margin-top: 20px; padding: 14px; font-size: 16px; border: 1px solid #e5e1d8; border-radius: 12px; background: #fff; color: var(--fg); }
+  .btn { width: 100%; margin-top: 12px; padding: 14px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #d4ae4f, #b8902e); color: var(--gold-dark); }
+  .btn:disabled { opacity: .6; }
+  .err { color: var(--danger); font-size: 14px; margin-top: 10px; min-height: 18px; }
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border: 0; border-radius: 14px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.06); text-align: left; color: var(--fg); font-size: 15px; }
+  .row .meta { min-width: 0; flex: 1; }
+  .row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .small { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .thumb { width: 44px; height: 58px; flex: none; border-radius: 8px; background: var(--accent); object-fit: cover; display: flex; align-items: center; justify-content: center; color: var(--gold); font-size: 11px; font-weight: 700; }
+  .back { border: 0; background: none; padding: 4px 0; margin-bottom: 8px; color: var(--gold); font-size: 15px; font-weight: 600; }
+  .viewer img { display: block; width: 100%; height: auto; border-radius: 12px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .viewer iframe { width: 100%; height: 70vh; border: 0; border-radius: 12px; background: #fff; }
+  .open { display: inline-block; margin-top: 10px; color: var(--gold); font-weight: 600; font-size: 14px; }
+  .fields { margin-top: 16px; padding: 4px 14px; border-radius: 14px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0ece3; font-size: 14px; }
+  .field:last-child { border-bottom: 0; }
+  .field .k { color: var(--muted); }
+  .field .v { text-align: right; word-break: break-word; }
+  .reveal { border: 0; background: none; color: var(--gold); font-weight: 600; font-size: 14px; padding: 0; }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<div id="bar" class="bar" hidden></div>
+<div id="app" class="wrap"></div>
+<script src="/offline/viewer.js"></script>
+</body>
+</html>

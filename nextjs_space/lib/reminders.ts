@@ -3,7 +3,7 @@
 // A document's expiry date is derived from its vault's designated expiry field
 // (see getExpiryFieldKey) and stored, denormalized, on Document.expiryDate so
 // reminder queries stay cheap and an optional scheduled email job can read it
-// directly. All date maths here works in whole calendar days (UTC-normalised)
+// directly. All date math here works in whole calendar days (UTC-normalized)
 // so a document is never "expired" a few hours early because of a timezone.
 
 import type { FieldDef } from "@/lib/vault-fields";
@@ -95,7 +95,7 @@ export function reminderLabel(status: ExpiryStatus, days: number): string {
   return "";
 }
 
-// Normalises an arbitrary lead-days value to a sane integer (1..730).
+// Normalizes an arbitrary lead-days value to a sane integer (1..730).
 export function normalizeLeadDays(value: unknown): number {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return DEFAULT_REMINDER_LEAD_DAYS;

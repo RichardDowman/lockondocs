@@ -138,7 +138,7 @@
   .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
 
   /* Hero background. Edge-fade layers sit on top of the tint layers so the
-     gold/grey tint fades to the page background at every edge, blending
+     gold/gray tint fades to the page background at every edge, blending
      cleanly into the white frame around the embed. */
   .hero-gradient {
     background-color: hsl(var(--background));

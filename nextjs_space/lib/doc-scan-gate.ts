@@ -33,8 +33,10 @@ import { blendCorners, cornersAreGood, cornersDrift, type Corners } from "./doc-
 // How often the live loop is allowed to run the detector.
 export const DETECT_INTERVAL_MS = 200;
 // Quiet period after the camera opens during which nothing is counted or
-// captured, while exposure and focus settle.
-export const WARMUP_MS = 1200;
+// captured, while exposure and focus settle. Build 38 shortened this from
+// 1200ms: the hold below is what actually proves a document is there, and the
+// long wait read as the scanner being slow to grab.
+export const WARMUP_MS = 500;
 // How long a document must then be held steady before the shutter fires.
 export const HOLD_MS = 1400;
 // ...and the minimum number of detections making up that stretch, so a couple
@@ -60,9 +62,10 @@ export const MISS_PENALTY = 1;
 export const MAX_MISS_STREAK = 4;
 // What a frame that lands outside either of those tolerances costs, and how
 // many of them in a row are treated as a wobble before the hold is abandoned
-// as genuine movement.
+// as genuine movement. Three (Build 38, was two) rides out the brief jolt of a
+// larger phone refocusing; a slow pan is still stopped by MAX_TOTAL_DRIFT.
 export const UNSTEADY_PENALTY = 1;
-export const MAX_UNSTEADY_STREAK = 2;
+export const MAX_UNSTEADY_STREAK = 3;
 
 // Why the gate is in its current state. Surfaced for the on-screen hint and
 // the diagnostics overlay, so a hold that keeps breaking can be explained
@@ -119,6 +122,10 @@ export function createCaptureGate(startedAt: number): CaptureGate {
   let frames = 0;
   let misses = 0;
   let unsteady = 0;
+  // Settled frames since the hold began, not counting the frame it began on.
+  // Zero means the anchor itself has never been confirmed, so it might be the
+  // one stray detection rather than where the document really is.
+  let confirmed = 0;
 
   const reset = () => {
     last = null;
@@ -128,6 +135,7 @@ export function createCaptureGate(startedAt: number): CaptureGate {
     frames = 0;
     misses = 0;
     unsteady = 0;
+    confirmed = 0;
   };
 
   const feedback = (
@@ -202,14 +210,20 @@ export function createCaptureGate(startedAt: number): CaptureGate {
       // One of those is a wobble or a noisy detection. A run of them is the
       // document genuinely going somewhere, and ends the hold.
       const givenUp = displaced && unsteady + 1 > MAX_UNSTEADY_STREAK;
+      // A hold that began on a stray detection would otherwise treat every
+      // correct frame after it as the wobble, so an anchor nothing has agreed
+      // with yet simply moves to the newer frame. Nothing was earned, so this
+      // is not reported as an abandoned hold.
+      const reanchor = displaced && confirmed === 0;
 
       let broke = false;
-      if (fresh || givenUp) {
-        broke = frames > 0;
+      if (fresh || givenUp || reanchor) {
+        broke = frames > 0 && !reanchor;
         frames = 1;
         streakStart = now;
         anchor = corners;
         unsteady = 0;
+        confirmed = 0;
         // Start the reference again from this frame.
         last = corners;
       } else if (displaced) {
@@ -220,6 +234,7 @@ export function createCaptureGate(startedAt: number): CaptureGate {
         frames = Math.max(0, frames - UNSTEADY_PENALTY);
       } else {
         unsteady = 0;
+        confirmed += 1;
         frames += 1;
         // Smooth the reference so the next frame is compared against the recent
         // average rather than one possibly noisy detection.

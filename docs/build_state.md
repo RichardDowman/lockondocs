@@ -746,3 +746,196 @@ Genuine detection is unchanged and is now enforced at the moment of capture as w
 - Not verified on hardware: real iPhone and Samsung Browser devices cannot be run from the build environment. The iOS behaviour needs a spot-check on the reporting device after deploy, and the `?debug=1` panel from Build 36 is there so the figures can be read from the handset rather than inferred.
 - IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds also await that deploy.
 - Build counter is now at 37. The next 5-build review point is Build 40.
+
+## Build 38 (2026-10-01)
+
+### Summary
+
+Follow-up to Richard's walkthrough with Tracey on the GoodBarber native preview. Four areas, with scan readability as the top priority.
+
+1. Readable scans (priority). The root cause of poor image quality was the camera stream itself: the scanner captured from a low-resolution preview stream, so even a superb camera produced a small image before any straightening happened. The scanner now asks the browser for a 4K stream (3840 x 2160), captures the full-resolution frame at the shutter (capped at 16 megapixels), and on browsers that support it (Chrome on Android) also takes a full still photo and uses it when it is genuinely larger. Straightening now uses a high-quality perspective warp at the document's own resolution, never upscales, and caps the output at 3508 px on the long edge (A4 at 300 dpi). Scans are encoded at JPEG quality 0.95, and the processed page at 0.93 (was 0.9). Readability wins over the straightener: it works at the page's own resolution and never upscales, and if a page cannot be straightened at all the full-resolution photo is kept uncorrected (the user can still crop it by hand).
+2. A quicker, steadier grab. Warm-up cut from 1.2 to 0.5 seconds, so a steady document now captures at about 2.0 seconds instead of 2.6. Three frames in a row may now land wide of the mark before the hold restarts (was two), a stray first frame can no longer lock the hold to the wrong position, and the document only needs to fill 10 per cent of the frame (was 22) so the phone can be held further back. On iPhone the scanner locks to the main back lens so the phone does not hop between lenses mid-hold, and on Android continuous autofocus is requested where supported.
+3. Save flow on the review screen. Save is now a fixed gold footer bar pinned below the scrolling details panel, so it is always visible and never covers the last field. Leaving the scanner after a capture (close button, browser or system back gesture, reload, or "Choose a different source") now asks "Are you sure you want to exit? Your unsaved changes will be lost." The custom thumbnail tool is now pinch, zoom and drag of the page under a tile-shaped window.
+4. Tap to zoom. On the document screen an image document now opens in a full-screen viewer with pinch, double-tap and drag, so small print can be read.
+
+Folder icons: no change. The ten vaults have used the built-in icon set since Build 21. The custom designs from Tracey have still not been received; they will be wired in when the files arrive (SVG preferred, or 256 px transparent PNG).
+
+### Technical notes
+
+- `lib/doc-scan.ts`: `MIN_AREA_RATIO` 0.22 to 0.1. New `detectCornersScaled` (detects at 1000 px and 640 px, plus full size when the long edge is 2600 px or less, then scales the corners back), `correctCanvasToDataUrl` (OpenCV `warpPerspective` with bicubic interpolation and replicated borders, falling back to the jscanify warp), `MAX_OUTPUT_LONG_EDGE` 3508 and `MAX_SOURCE_PIXELS` 16,000,000.
+- `lib/doc-scan-gate.ts`: `WARMUP_MS` 1200 to 500 and `MAX_UNSTEADY_STREAK` 2 to 3. New `confirmed` count of settled frames since the hold began; a displaced frame while `confirmed` is still 0 re-anchors the hold instead of counting against it. Without this, the longer streak let a stray first frame hold the anchor in the wrong place. `HOLD_MS` (1.4 s), both drift tolerances, six earned frames and the rule that capture only fires on a settled frame are unchanged.
+- `components/scanner/scanner-screen.tsx`: 4K stream request with fallback; iPhone main-lens lock (reopens on the device labelled "Back Camera" if a different lens was chosen); Android continuous focus; full-resolution capture with `ImageCapture.takePhoto` where available (2 second timeout, used only when same orientation and more than 1.2 times the video pixels); the last well-framed live outline (under 1 second old) is used as a straightening hint if detection on the still fails; the `?debug=1` panel gains a camera line (lens label and stream resolution). Gold save footer, exit confirmation (history guard entry, back-gesture interception, `beforeunload`, and the guard entry stepped off before navigating after a save or confirmed exit) and the new thumbnail framer.
+- New files: `lib/use-pinch-zoom.ts` (pointer pan, two-finger pinch, wheel and double-tap zoom), `components/app/zoom-viewer.tsx` (full-screen viewer), `components/scanner/thumb-framer.tsx` (3:4 framing window). `components/document/document-screen.tsx` opens the viewer from the image preview. `lib/imaging.ts` default page quality 0.9 to 0.93.
+- A native shell closing the whole webview cannot be intercepted by a web page, so the exit confirmation covers everything inside the app but not the GoodBarber shell itself closing.
+- Larger, sharper pages mean bigger files. The upload limit remains 25 MB per file; a long multi-page PDF of high-resolution pages could approach it. Not changed in this build.
+- No schema, data or package dependency change.
+
+### Verification
+
+- Gate unit test: 21 of 21 checks pass across five runs, including the new "stray first frame does not lock the hold" (every third frame placed wide, captures at 3.4 seconds). Steady document captures at 2.0 seconds, occasional blip at 2.0, shaky hand at 2.6, real loss at 3.8, moved and held at 4.0. A panning document, constant wobble, flickering detection, a full-frame shape and 30 sessions of random shapes still never capture.
+- Imaging harness (synthetic frames in a real browser): live detection 9 of 9, straightening 5 of 5. An A4 page from a 4K frame straightens to 1671 x 2613 px with 30 px fine print legible; the same page from a 480 px stream gives only 372 x 579 px, which confirms the stream resolution was the bottleneck.
+- Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known test-harness smoke-signup artifact from Build 22 and is not a code issue.
+- Not verified on hardware: real iPhone 14 Pro Max and Samsung devices cannot be run from the build environment, and the save footer, exit confirmation, pinch thumbnail and zoom viewer were build-tested only, not exercised in a browser. The `?debug=1` camera line shows which lens and resolution each phone actually delivers.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect. Still-undeployed builds also await that deploy.
+- Build counter is now at 38. The next 5-build review point is Build 40.
+
+### Browser check addendum (2026-10-01, same build, counter unchanged)
+
+- After the checkpoint above, the review screen was exercised in a desktop browser on the development server using an uploaded test image (no document was saved). Confirmed: the gold "Save document" footer stays pinned and, scrolled fully down, the Retake and Add page buttons sit fully visible above it; the thumbnail tool zooms and drags and "Set thumbnail" gives "Custom preview set" with the zoomed crop; the close button and the browser back button both open "Are you sure you want to exit?" and Stay keeps the user on the scan.
+- Bug found and fixed: pressing Exit left the user on the scanner. Cause: when the scanner page loads directly, its back-gesture listener runs before the app router's own, so the navigation to the home screen was discarded by the router's history restore. Fix in `components/scanner/scanner-screen.tsx`: the navigation now waits 60 ms, until the router has finished stepping back.
+- Re-verified after the fix: close button then Exit lands on the home screen, and browser back then Exit lands on the home screen. Type check, production build and auth smoke tests pass again (same known Resend 422 harness artifact).
+- Still not exercised in a browser: the tap-to-zoom viewer on the document screen (it needs a saved image document and no test data is created). Still not verified on a real iPhone or Samsung handset.
+
+## Build 39 (2026-10-03) - Auto-detect restored, paged review card, whole-page document preview
+
+Requested by the developer after testing Build 38: (1) auto-detect stopped finding edges after the image-quality increase, so every photo had to be taken manually; (2) the details panel covered most of the scan, asking for one question at a time with Next and Back; (3) a saved image opened from a vault appeared zoomed in instead of showing the whole page or the chosen crop; (4) the old folder icons are still in place.
+
+- Item 1, likely cause (hypothesis, not confirmed on a handset): Build 38 opened the camera with a 4K request. On multi-lens phones that can steer the browser to a different rear lens than a plain rear-camera request, and a 4K live stream is heavy to decode and shrink every 200 ms. A synthetic harness (desk, light and far scenes at 480 px, 1080p and 4K) still detected at every size, so resolution alone did not break detection in the harness. Fix in `components/scanner/scanner-screen.tsx`: the camera opens exactly as in Build 37 (rear camera, no resolution request), then the same camera is raised to 1080p in place, so lens choice matches the build where auto-detect worked. The iPhone single-lens re-open from Build 38 is removed. The live detector now shrinks the frame in two smoothed steps instead of one jump, so print and texture do not turn into edge noise. The full-resolution still at the shutter (Android Chrome) and the full-resolution straightening are unchanged, so readability is kept. Gate logic and timings unchanged (gate unit test 21 of 21).
+- Item 2: the review screen's tall scrolling panel and separate save bar are replaced by a compact card with one step at a time, a progress bar, "Step x of N", and Back and Next. Steps: Check the page (rotate, crop, original or auto-cropped, pages, Retake, Add page) or Your file for uploaded PDFs; Which vault? (Next is blocked until a vault is chosen); Name this document; one step per vault field (optional, Next skips); Brightness and contrast; Save options (PDF and preview thumbnail). On the last step Next becomes the gold Save document button. Enter in a text field moves to the next step. A fresh scan or file starts at step 1; a failed save keeps the step. Save validation, the exit confirmation, crop mode and the PDF path are unchanged.
+- Item 3: `components/document/document-screen.tsx` preview now pins the image to a fixed 60vh box with object-contain, so the whole saved page (or the crop the user chose) always shows. Likely cause (hypothesis): sizing the full-resolution scan as a flex item let some mobile browsers grow it past the box. The full-screen viewer already opens at fit-to-screen and was not changed. The saved file itself was checked in code: it is the full baked page, not the thumbnail.
+- Item 4: not changed. The shared zip (`tinified.zip`) contained a single photograph (a choir on stage, 2500 x 1667), not icon artwork, and no icon files exist among the uploads. The developer has been asked to re-share the icons (SVG preferred, or 256 px transparent PNG, one per vault, named by vault).
+- Verified: type check and production build pass, gate unit test 21 of 21, auth smoke tests pass (known Resend 422 harness artifact). Review card checked in a desktop browser on the development server with an uploaded test image (no document saved): Step 1 of 10 to Step 10 of 10 with Next and Back, scan stays visible above the card, the last step shows the gold Save document button; slider thumbs were clipped on the Brightness and contrast step, fixed with inner padding and re-checked. The document-screen preview fix was not viewed in a browser (it needs a saved image document and no test data is created). Not verified on a real iPhone or Samsung handset.
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect.
+- Build counter is now at 39. The 5-build review point is next build (Build 40).
+
+## Build 40 (2026-10-06) - Fewer false grabs on busy backgrounds, US English sweep, sharing and offline review
+
+Requested by the developer after Tracey's review feedback: (1) the scanner can auto-grab on a background that is not clear, and auto-grab must be excellent because it is key to the app; (2) sweep all app content so it is always US English, and add that rule to the custom instructions; (3) review what exists against the planning for document sharing and offline access, which Tracey did not find.
+
+Note on item 1: Tracey's sentence ("scanner can auto grab even on a background that's NOT clear") can be read as a problem (it grabs the wrong thing) or as an observation (it still grabs on a busy background). The developer read it as a problem. The work below improves both readings, and the reply to Tracey asks for a photo of any wrong grab.
+
+### Item 1: scanner detection
+
+- Likely cause (from the offline harness, not confirmed on Tracey's handset): Builds 32 to 39 asked the detection library for its single largest edge outline. On a busy surface that outline is usually the background (wood grain, tiles, a keyboard), so the document was often missed, and when a shape did pass the shape checks it could be one stitched together from the page and a bright patch beside it.
+- Fix in `lib/doc-scan.ts` (`detectCorners`): every closed outline is now collected from three views of the frame (the library's own edge map, a light-against-dark view, and a gentle edge view thickened so broken outlines close). Each outline of at least 6 percent of the frame is turned into a four-cornered shape and must pass the existing shape checks, then a new paper check (`looksLikePaper`): along every side, at least 75 percent of 28 sample points must show a real step from a brighter inside to a darker outside, with at most 10 percent stepping the wrong way; the middle of the shape must be clearly brighter than its surroundings; and no more than 25 percent of the inside may be very dark. The largest shape that passes wins, so the text block printed inside a page never beats the page itself. A shape that fails the paper check is never returned, so it can never be captured. The old single outline is only offered when it is NOT well framed, purely to draw the guide outline.
+- Unchanged: the capture gate (hold time, steadiness, warm-up and every guard from Builds 33 to 39), the camera open, the full-resolution capture and straightening, and the review screen's "Use original" / "Use auto-cropped" toggle.
+- Offline harness results (single 360 px frames; the gate then needs about 2 seconds of steady detection before it fires):
+
+| Test set | Build 39 | Build 40 |
+|---|---|---|
+| Real photos with no document: shapes accepted | 0 of 351 | 1 of 351 (a sunlight patch on a dark floor) |
+| Documents placed on busy backgrounds: correct | 6 of 120 | 64 of 120 |
+| Same set: partial (ID card found without its dark header band) | 0 | 46 |
+| Same set: wrong shape | 1 | 0 |
+| Same set: missed (manual shutter needed) | 113 | 10 |
+| Real photos of documents: detected | 7 of 19 | 9 of 19 |
+
+- Gained: a page on granite, a page at an angle on wood, and a far-away page. Lost: white paper on a white desk (there is almost no edge to see; the manual shutter covers it).
+- Known limitations: (a) an ID card with a dark header band is often found without the band, because the band blends into a dark surface; the review screen's "Use original" button restores the full photo, and an attempt to extend the shape over the band was tested and rejected (no improvement, only 2 of the 46 cases even had a full-card outline to find); (b) white on white still needs the manual shutter; (c) a bright, paper-shaped patch of sunlight on a dark floor can be accepted; (d) 10 of 19 real document photos are still not detected and fall back to the manual shutter.
+- Browser parity: the shipped detection code was run in Chrome with the same OpenCV and scanning library versions the app loads, on 490 frames: 490 of 490 matched the analysis model, with no corner difference. Time per frame on the build machine: median 14.8 ms, slowest 39.8 ms (detection runs every 200 ms). Phone timing not measured.
+- The test photos stay outside the project and are never shipped.
+
+### Item 2: US English sweep
+
+- Screens and metadata: "Organize securely", "scan, organize and securely" (home), "organize" (sign-in), and the page description (twice). `<html lang="en-US">` on the app and on the data export file.
+- Default vault fields (`lib/vault-fields.ts`), for vaults created from now on: "Driver's license", "License" (Education options) and "Issuing organization". Stored field keys are unchanged.
+- Dates now use the US format (en-US, M/D/YYYY) in six places: the Reminders screen, the document screen, the default scan name ("Scan 10/6/2026"), the admin console dates, the reminder emails and the data export.
+- Code comments brought to US spelling in nine files. Code identifiers were not renamed.
+- Existing data (read-only count, nothing changed): 60 of 300 vaults still show UK labels (Licence, organisation, licence) because their field definitions were stored when they were created, and 3 of 36 documents hold "licence" or "organisation" in their saved details. Updating these needs a one-off backfill and the developer's go-ahead. Masking of license fields still works for both spellings.
+- Docs: CUSTOM_INSTRUCTIONS.md gains rule 7 (US English, always). UK spellings in CUSTOM_INSTRUCTIONS.md, scanner.md, files.md and production.md were changed to US spelling, and files.md now records the reminder emails as US English. Earlier entries in this file are left as written, because it is append-only.
+
+### Item 3: sharing and offline review
+
+- New doc `sharing_offline_review.md`: offline access was in Tracey's original requirements and the proposal (a core capability, the Phase 1 purpose and a Phase 2 bullet) and was deferred in Build 11; document sharing came from the Digital Vault Architecture brief and has needed a separate go-ahead since Build 25. Neither is built. The doc sets out the iOS and GoodBarber constraints, a staged scope for each, the commercial position (offline to be agreed between Richard and Tracey; sharing is new scope, to be scoped and quoted) and questions for Tracey. No code change.
+
+### Verification
+
+- Gate unit test 21 of 21. Type check clean (tsc exit 0), production build succeeds, automated auth and session smoke tests pass (signup 201, login 200, session present). The Resend 422 "example.com" line during automated testing remains the known Build 22 test-harness artifact and is not a code issue. Checkpointed, not deployed.
+- Not verified on hardware: no iPhone or Samsung handset was used, so the new detection needs a real-device check after deploy (the `?debug=1` panel shows what each phone sees).
+- IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app to take effect.
+- Build counter is now at 40. This is the 5-build review point: Richard, please review this file for Builds 36 to 40. The next review point is Build 45.
+
+## Docs note (2026-10-06, after Build 40) - Offline access plan
+
+- Docs only, no code change, build counter stays at 40.
+- New `offline_plan.md`: delivery plan for offline access. Step 0 proof of concept inside the GoodBarber app (go or no-go), Step 1 read-only encrypted offline vault, Step 2 offline scanning with an upload queue, Step 3 optional offline edits, Step 4 device testing. Includes fallback Plans B and C, security notes, effort estimates in builds (not a quote) and questions for Tracey.
+- `sharing_offline_review.md` now points to the plan.
+
+## Build 41 (2026-10-06) - Offline proof of concept test page (Step 0)
+
+Requested by Richard: "give me the test then and I will run it on both my ios and android devices."
+
+- New static test page at `/offline-test/index.html` (files in `public/offline-test/`: `index.html`, `sw.js`, `ping.txt`). It installs a service worker scoped to `/offline-test/` only, saves one AES-256 encrypted test sentence in the on-phone database, asks for persistent storage, checks the real network with an uncached ping, and shows a verdict, a results table and a run history. Buttons: open in the in-app browser (same method as "Access My Vault"), run again, copy results, reset.
+- Holds no documents and no personal data, needs no sign-in, is not linked from the app and is marked noindex. It does not affect any vault page.
+- New doc `offline_poc_test.md`: the test script (Parts A to D: GoodBarber section, in-app browser, phone browser baseline, next day), results to send and how to read them against offline_plan.md.
+
+### Verification
+
+- Opened in the build machine's browser with signal: service worker installed, page copy kept, encrypted record readable, verdict "Ready" on the second load. The offline (Airplane Mode) step was not run on the build machine; that is what Richard's phone test is for.
+- Checkpointed, not deployed. IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app before the test can be run on phones.
+- Build counter is now at 41. The next review point is Build 45.
+
+## Docs note (2026-10-06, after Build 41) - Step 0 first results (Android, GoodBarber section)
+
+- Docs only, counter stays at 41. Tested by Richard in the My GoodBarber preview app on a Samsung SM-S918B (Galaxy S23 Ultra), Android 16, Android WebView (Chrome 153).
+- Part A online (4:08 PM to 4:09 PM): shown inside an embed, service worker installed, page copy kept, on-phone database available, encrypted record readable, verdict "Ready". Persistent storage not granted; 10240 MB available.
+- Part A offline (4:52 PM): GoodBarber showed the Android WebView error page "Web page not available ... net::ERR_INTERNET_DISCONNECTED" for /offline-test/index.html. The saved copy was not used, so our page never ran.
+- Likely cause (not confirmed): the section loads our page inside an embed, and the stored page copy is tied to the outer GoodBarber page. If that outer page has no stable web address (a local or blank page in the native app), the copy cannot be found again on the next launch. A section setting that loads the address directly rather than embedded could behave differently.
+- Still to run: Part B (in-app browser), Part C (Chrome baseline), Part D (next day) and all parts on iPhone. The preview app may also differ from the published GoodBarber app.
+
+## Docs note (2026-10-06, after Build 41) - Step 0 Part B results (Android, in-app browser)
+
+- Docs only, counter stays at 41. Same Samsung phone, My GoodBarber preview app.
+- Scenario 1: opened the test page in the in-app browser with signal, turned on Airplane Mode, went back to the GoodBarber section (still open in memory) and tapped "Open in in-app browser" again: PASS. Our page opened from the copy saved on the phone with no internet.
+- Scenario 2: same start, then fully closed the preview app and relaunched it with Airplane Mode on: the GoodBarber custom section did not load, so there was no way to reach our page.
+- Reading: on Android, offline works once our page is opened first-party in the in-app browser (the way the live vault already opens). The blocker is the entry point: the GoodBarber section itself needs a connection on a cold start, before any of our code runs.
+- Open points: what the preview app showed in scenario 2 (GoodBarber error, blank, or the Android error page); whether the published GoodBarber app behaves the same (the preview app may fetch the project from GoodBarber on every launch); whether GoodBarber offers a section type stored inside the app (an HTML5 or custom code section) that could hold a small launcher button opening vault.lockondocs.app in the in-app browser. Part C, Part D and iPhone still to run.
+
+## Build 42 (2026-10-06) - Installable offline vault test
+
+Requested by Richard: a Settings style switch, off by default, that installs an offline vault to the home screen. The installed vault shares the same account and data set as the vault inside GoodBarber; offline work waits for the next connection and is then pushed to the live account. If the in-app route cannot install, switching it on should open the phone's own browser and prompt the install from there straight away.
+
+- Test page only (`public/offline-test/`). New `manifest.json` (name "LockonDocs Offline Vault (test)", short name "Vault test", scope `/offline-test/`, start `/offline-test/index.html?source=pwa`, standalone) and icons `icon-180.png`, `icon-192.png`, `icon-512.png` made from the LockonDocs logo.
+- `sw.js` cache v2: keeps the page, manifest and icons; page network first with the saved copy when there is no signal; ping still never cached; old caches removed.
+- `index.html`: manifest and home screen tags; "Offline vault" switch (off by default, remembered on the phone). Switching it on shows: Chrome's own install button when offered; "Open in Chrome" (Android intent link) from the Android in-app browser; "Open in Safari" plus the Add to Home Screen steps from an iPhone in-app browser; the steps directly in iPhone Safari; Copy link everywhere as a backup. Opening the page with `?offline=on` switches it on and opens the sheet at once (this is the fallback route). New results rows: Opened from home screen, Install prompt available, Platform; run history adds "installed"; new verdicts "Ready (installed)" and "PASS: installed vault opened from the home screen with no internet."
+- Still no documents, no personal data, no sign-in, unlinked and noindex. No change to any vault page.
+- Docs: `offline_poc_test.md` Part E and new result rows; `offline_plan.md` section 5A "Installed offline vault".
+
+### Verification
+
+- Page scripts pass a syntax check, manifest is valid JSON, and all seven files in `/offline-test/` are served (200) on the build machine. Type check clean, production build succeeds, sign-up and login smoke tests pass (Resend 422 is the known test-harness artifact). Not tested on any phone: the install, the jump from GoodBarber to Chrome or Safari, and the offline open from the home screen icon all need Richard's Samsung and iPhone test after deploy.
+- Checkpointed, not deployed. IMPORTANT: requires a MANUAL redeploy to vault.lockondocs.app before Part E can be run.
+- Build counter is now at 42. The next review point is Build 45.
+
+
+## Build 43 (2026-10-06) - Offline vault in Settings
+
+Asked (Richard, after the Build 42 airplane mode PASS): make it less clicky (if the toggle is on, open the browser with no notice) and build it properly into the live Settings page.
+
+What was built:
+- Settings has a new "Offline vault" switch (components/offline/offline-vault-card.tsx). Switching it on acts in the same tap with no explanation: the installed app starts saving straight away; a browser with an install prompt shows it; the Android in-app browser hands over to Chrome and the iPhone in-app browser hands over to Safari, both on /install?offline=on; other browsers go to /install. A small "Copy link" button appears only if the hand-over does not leave the page within 1.8 seconds. The setting is per phone (stored on the phone, no database change). Status line: "Saved for offline · X of Y documents · M/D/YYYY h:mm".
+- New /install page (public, noindex): one action only. Chrome or Samsung: one gold "Install LockonDocs" button (the browser requires a tap). iPhone Safari: "Tap Share, then Add to Home Screen." After install: "Done. Open LockonDocs from your home screen."
+- App manifest (app/manifest.ts, start page /home?source=pwa) and new icons in public/icons/. The browser's own install banner is suppressed so nobody is prompted unasked.
+- Root service worker public/sw.js, registered only when the setting is on, in the installed app, or on /install. Pages always come from the network; only when the network fails is the offline viewer shown. API calls and documents are never cached by the worker.
+- Read-only offline vault (Step 1 of offline_plan.md): components/offline/offline-sync.tsx copies vaults, document details, thumbnails and files (newest first, 250 MB cap) into IndexedDB on the phone, at most every 10 minutes, on reconnect and when the app comes back to the front. Deleted documents are removed from the copy on the next sync.
+- Encryption on the phone: every record is AES-GCM 256. The key comes from a per-phone key pair whose private half is stored only wrapped by a key derived from the user's password (PBKDF2 SHA-256, 310,000 rounds). The password is never stored. It is picked up at sign-in or unlock; the installed app asks once through the lock screen ("Enter your password to save your vault for offline use.").
+- Offline viewer public/offline/{index.html, viewer.js}: password, vaults, documents, image or PDF view, fields with sensitive values masked (tap to show), banner "Offline · showing the copy saved ...", "Back online" button that returns to the live vault, relocks after 5 minutes in the background, wipes the copy after 10 wrong passwords.
+- Switching the setting off removes the copy, its key and the worker from that phone. Signing out and deleting the account also remove the copy.
+
+Not in this build: offline scanning, the upload queue, and offline edits pushing to the live account (Steps 2 and 3). No phone test yet. The /offline-test/ page is still there and can be removed once Build 43 is confirmed on phones.
+
+Verification: type check and build pass, test_nextjs_project run (see note), static files return 200. Not browser or phone tested.
+
+Counter 43. Next review Build 45.
+
+
+## Build 44 (2026-10-06) - Tracey's vault icons and a docked bottom bar
+
+Requested by the developer: replace the old line icons with Tracey's illustrated vault icons (LockonDocs_Icons_Transparent zip, 10 PNGs, 1024 px, transparent), and change the floating bottom bar to a fixed, docked footer because it clashed with content scrolling behind it.
+
+- Icons: 9 of the 10 files were trimmed, resized to 192 px transparent PNGs and added in public/vault-icons/. They are matched to the stored icon key of each vault (fingerprint, receipt, car, home, graduation-cap, scale, briefcase, lock, heart-pulse), so existing vaults and custom vaults that chose those icons show the new artwork with no data change. Shown on the vault grid, the vault header, the icon picker and the small icons on the Reminders and document screens.
+- Financial (Vault-07_Financial.png) is damaged in the zip: the file is cut off and only the top part of the image decodes. It was not used, and Financial keeps its line icon until a complete file is re-sent.
+- Bottom bar: now a solid bar docked to the bottom edge, full width of the app, with a top border and soft shadow, no transparency or blur. The gold scan button still sits raised in the center. Page bottom padding adjusted so the last item clears the bar.
+
+Verification: type check and build pass, test_nextjs_project run. Not browser or phone tested.
+
+Counter 44. Next review Build 45.
+
+
+## Build 45 (2026-10-06) - Financial vault icon
+
+- Tracey re-sent Vault-07_Financial.png (complete, 1024 px, transparent). It was trimmed and saved as public/vault-icons/wallet.png in the same way as the other 9 and mapped to the stored "wallet" key, so the Financial vault and any custom vault using that icon now show the artwork. All 10 vault icons are now illustrated. No data change.
+
+Verification: type check and build pass, test_nextjs_project run. Not browser or phone tested.
+
+Counter 45. This is the 5-build review point (Builds 41 to 45); next review Build 50.

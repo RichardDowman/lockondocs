@@ -1,5 +1,5 @@
 // Shared formatting helpers for the admin console. Kept hydration-safe by
-// always using a fixed locale (en-GB) and UTC timezone so server and client
+// always using a fixed locale (en-US) and UTC timezone so server and client
 // render identical strings.
 
 export function formatBytes(bytes: number): string {
@@ -13,7 +13,7 @@ export function formatBytes(bytes: number): string {
 
 export function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("en-GB", { timeZone: "UTC" });
+    return new Date(iso).toLocaleString("en-US", { timeZone: "UTC" });
   } catch {
     return "";
   }
@@ -21,7 +21,7 @@ export function formatDate(iso: string): string {
 
 export function formatDateShort(iso: string): string {
   try {
-    return new Date(iso).toLocaleDateString("en-GB", { timeZone: "UTC" });
+    return new Date(iso).toLocaleDateString("en-US", { timeZone: "UTC" });
   } catch {
     return "";
   }

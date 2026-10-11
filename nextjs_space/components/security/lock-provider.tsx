@@ -18,6 +18,11 @@ import {
   DEFAULT_AUTO_LOCK_MINUTES,
   normalizeAutoLockMinutes,
 } from "@/lib/auto-lock";
+import {
+  OFFLINE_NEEDS_PASSWORD_EVENT,
+  rememberOfflinePassword,
+  wipeOfflineCopy,
+} from "@/lib/offline/vault-store";
 
 const ACTIVITY_EVENTS = [
   "mousemove",
@@ -44,7 +49,9 @@ const ACTIVITY_EVENTS = [
  * A value of 0 minutes means "Never" - no idle lock and no background lock.
  */
 export function LockProvider({ children }: { children: React.ReactNode }) {
-  const { status } = useSession() || {};
+  const { data: session, status } = useSession() || {};
+  const sessionUser = session?.user as any;
+  const [offlineSetup, setOfflineSetup] = useState(false);
   const authenticated = status === "authenticated";
   const router = useRouter();
 
@@ -231,6 +238,17 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [authenticated, lockNow, armTimer]);
 
+  // The installed app asks for the password once to key the offline copy.
+  useEffect(() => {
+    if (!authenticated) return;
+    const onNeed = () => {
+      setOfflineSetup(true);
+      lockNow();
+    };
+    window.addEventListener(OFFLINE_NEEDS_PASSWORD_EVENT, onNeed);
+    return () => window.removeEventListener(OFFLINE_NEEDS_PASSWORD_EVENT, onNeed);
+  }, [authenticated, lockNow]);
+
   async function handleUnlock() {
     if (!password) {
       setError("Please enter your password.");
@@ -245,6 +263,10 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
+        if (sessionUser?.id) {
+          void rememberOfflinePassword(password, sessionUser.id, sessionUser.email ?? "");
+        }
+        setOfflineSetup(false);
         setLocked(false);
         setPassword("");
         hiddenAtRef.current = null;
@@ -275,6 +297,7 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     setLocked(false);
+    await wipeOfflineCopy();
     await signOut({ redirect: false });
     router.replace("/login");
   }
@@ -292,7 +315,9 @@ export function LockProvider({ children }: { children: React.ReactNode }) {
               Vault locked
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Enter your password to unlock your documents.
+              {offlineSetup
+                ? "Enter your password to save your vault for offline use."
+                : "Enter your password to unlock your documents."}
             </p>
             <div className="mt-6 space-y-2 text-left">
               <Input

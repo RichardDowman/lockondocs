@@ -11,7 +11,7 @@
 
 ## Description
 
-Users can create, rename, and delete folders to organise their scanned documents. The system provides a set of pre-created default folders and allows users to add their own. Documents can be viewed, moved between folders, searched, and sorted.
+Users can create, rename, and delete folders to organize their scanned documents. The system provides a set of pre-created default folders and allows users to add their own. Documents can be viewed, moved between folders, searched, and sorted.
 
 > Terminology note (Build 14): the user-facing label for a folder is now "Vault" (plural "Vaults") throughout the app. This is a display-only rename. The underlying data model, API routes, URLs and code identifiers still use "folder" for stability, so this doc continues to use "folder" when describing the implementation.
 
@@ -33,7 +33,7 @@ Users can create, rename, and delete folders to organise their scanned documents
 - [x] Sort documents by date or name
 - [x] Folder icons - built-in icon set live; custom graphics from Tracey deferred
 
-## Implemented Behaviour (Phase 2)
+## Implemented Behavior (Phase 2)
 
 ### Folder icons
 
@@ -142,7 +142,7 @@ Because the app runs embedded in the GoodBarber mobile shell, it cannot send pho
 
 - What is sent: for each document, at most one "expiring soon" email (when it comes within 30 days of its expiry date) and, later, at most one "expired" email (once the date has passed). Exactly one of each per expiry cycle, so users are never spammed.
 - Re-arming: if a document is renewed and its expiry date changes, both "sent" markers are cleared, so the new date can warn again with a fresh soon and expired email.
-- Branding: the emails use the same branded template as the rest of the app (logo, colours, a clear call-to-action button that opens the document). GB English, no em dashes.
+- Branding: the emails use the same branded template as the rest of the app (logo, colors, a clear call-to-action button that opens the document). US English (GB English before Build 40), no em dashes.
 - Opt out: each user can turn email reminders off with a toggle on the Reminders screen. When off, that user is skipped entirely by the send job. A document whose in-app reminder has been dismissed is also skipped.
 - Data model (additive, no data loss): User.emailRemindersEnabled (Boolean, default true), Document.reminderSoonSentAt (DateTime, nullable), Document.reminderExpiredSentAt (DateTime, nullable).
 - How it runs: a protected endpoint, POST /api/reminders/dispatch, does the work. It is guarded by a secret (sent as an Authorization: Bearer header or an x-cron-secret header) and is designed to be called once a day by a scheduled task. Each run selects the documents that need an email, sends it, marks the matching "sent" flag only on success, and records the result in the email log. It reports counts (candidates, soon sent, expired sent, failed) and writes a `reminder.emails_dispatched` audit entry.
@@ -152,9 +152,35 @@ Because the app runs embedded in the GoodBarber mobile shell, it cannot send pho
 
 ## Masked sensitive fields on the document screen (Build 31, Phase C)
 
-Because vaults hold high-sensitivity details (ID numbers, passport and licence numbers, account and policy numbers, usernames, patient names), the document Details panel now masks those values by default so they are not exposed to someone glancing at the screen.
+Because vaults hold high-sensitivity details (ID numbers, passport and license numbers, account and policy numbers, usernames, patient names), the document Details panel now masks those values by default so they are not exposed to someone glancing at the screen.
 
-- What is masked: only text and number fields whose name matches a sensitive pattern (for example id number, passport, licence, SSN or social security, account number, VIN, tax id, policy number, username, password, recovery code, patient name). Ordinary descriptive fields (for example account type or a service name) stay visible.
+- What is masked: only text and number fields whose name matches a sensitive pattern (for example id number, passport, license, SSN or social security, account number, VIN, tax id, policy number, username, password, recovery code, patient name). Ordinary descriptive fields (for example account type or a service name) stay visible.
 - Reveal and hide: when a sensitive field has a value, the Details header shows a Reveal control. Revealing asks the user to confirm their password (via the re-authentication endpoint) and then shows the values; Hide re-masks them. Masked values render as bullet dots until revealed.
 - Auto re-mask: if the app is backgrounded (the tab is hidden), revealed values are re-masked automatically, so nothing sensitive is left on screen when the user returns.
 - This works together with the app-wide auto-lock and re-authentication described in admin.md and production.md.
+
+## Tap to zoom and pinch thumbnails (Build 38)
+
+- Document screen: tapping an image document's preview opens a full-screen viewer with pinch to zoom, double-tap to zoom (2.5x) or reset, and drag to pan, so small print can be read. Escape or the close button returns to the document. PDFs still open in the existing PDF view.
+- Custom vault-tile thumbnails (set while saving a scan) are now framed by pinching, zooming and dragging the page under a fixed 3:4 tile window, replacing the old drag frame and size slider.
+- Folder icons: unchanged. Custom icon graphics from Tracey have still not been received, so the built-in set remains (see Folder icons above).
+
+## Whole-page document preview (Build 39)
+
+- The document screen's image preview is now pinned to a fixed box and letterboxed, so the whole saved page (or the crop chosen while scanning) is always shown and never appears enlarged. Tapping it still opens the full-screen pinch-zoom viewer, which opens at fit-to-screen.
+- Folder icons: still unchanged. The file shared on 2026-10-03 was a photograph, not icon artwork; the icons have been requested again.
+
+## US English labels and dates (Build 40)
+
+- Default vault fields now use US spelling for vaults created from Build 40 on: "Driver's license", the "License" option in Education, and "Issuing organization". Stored field keys are unchanged.
+- Dates on the document screen, Reminders screen, default scan names, reminder emails and the data export use the US format (M/D/YYYY).
+- Existing vaults keep the field labels stored when they were created. A read-only count found 60 of 300 vaults still showing UK labels (Licence, organisation, licence) and 3 of 36 documents with "licence" or "organisation" in their saved details. Updating them needs a one-off backfill and the developer's go-ahead. Sensitive-field masking matches both spellings, so masking is unaffected.
+- Sharing and offline access are not part of file management today; see `sharing_offline_review.md`.
+
+
+## Illustrated vault icons and docked bottom bar (Build 44)
+
+- Vaults now show Tracey's illustrated icons, matched by each vault's stored icon key, so no vault data changed. Financial still shows the line icon because its file arrived damaged; it will switch over once a complete file is supplied.
+- The bottom bar is docked to the bottom of the screen as a solid bar, so documents no longer show through or behind it.
+
+- Build 45: Financial now shows its illustrated icon too, so all 10 vault icons use Tracey's artwork.
