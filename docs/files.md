@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Feature name | Folder and File Management |
-| Status | Phase 1 complete; Phase 2 complete (custom icon graphics deferred) |
+| Status | Phase 1 complete; Phase 2 complete; supplied 40-icon library available for custom vault creation (Build 49) |
 | Phase | Phase 1 (basic) + Phase 2 (full) |
 | Priority | High |
 
@@ -31,15 +31,17 @@ Users can create, rename, and delete folders to organize their scanned documents
 - [x] Delete documents (with confirmation dialog)
 - [x] Search documents (by name, scoped to the signed-in user)
 - [x] Sort documents by date or name
-- [x] Folder icons - built-in icon set live; custom graphics from Tracey deferred
+- [x] Folder icons - original default artwork plus a 40-icon supplied library for custom vault creation (Build 49, preview only until deployed)
 
 ## Implemented Behavior (Phase 2)
 
 ### Folder icons
 
-- Folders support a built-in icon picker offering a curated set of choices (folder, personal, education, medical, work, document, wallet, home, travel, vehicle).
-- The icon can be chosen when creating a folder and changed later via the folder Rename dialog. The selection persists through the folder update endpoint.
-- Custom uploaded folder icons (client-supplied graphics from Tracey) are deferred until those image assets are provided. When the assets arrive, they can be added as additional choices or as an upload option without changing the storage model.
+- New custom vaults offer a searchable Choose an icon flow with all 40 supplied illustrated icons. Choosing artwork never creates extra vaults or changes the default vault set.
+- All 40 source PNGs already contain real transparency. Build 49 preserves their artwork and alpha channel, trims empty margins and prepares 192px versions under a new library-v49 path. No pink-background removal or AI regeneration was needed.
+- The 10 default vault definitions and their original image paths remain unchanged. New choices use separate library-01 through library-40 keys, so existing icons are not replaced.
+- The existing Rename dialog retains its prior smaller picker. The expanded library is exposed only during custom vault creation, as requested. A saved library icon is rendered by the shared FolderIcon component wherever that vault appears.
+- The picker includes labels, search, selected-state feedback, an empty-results message and a scrollable phone-sized grid. US English display labels include Certificates and Licenses.
 
 ### Move, rename, delete
 
@@ -175,7 +177,7 @@ Because vaults hold high-sensitivity details (ID numbers, passport and license n
 - Default vault fields now use US spelling for vaults created from Build 40 on: "Driver's license", the "License" option in Education, and "Issuing organization". Stored field keys are unchanged.
 - Dates on the document screen, Reminders screen, default scan names, reminder emails and the data export use the US format (M/D/YYYY).
 - Existing vaults keep the field labels stored when they were created. A read-only count found 60 of 300 vaults still showing UK labels (Licence, organisation, licence) and 3 of 36 documents with "licence" or "organisation" in their saved details. Updating them needs a one-off backfill and the developer's go-ahead. Sensitive-field masking matches both spellings, so masking is unaffected.
-- Sharing and offline access are not part of file management today; see `sharing_offline_review.md`.
+- Secure sharing was added in Build 46; see the current sharing section below. Offline work is tracked separately in `sharing_offline_review.md` and `build_state.md`.
 
 
 ## Illustrated vault icons and docked bottom bar (Build 44)
@@ -184,3 +186,25 @@ Because vaults hold high-sensitivity details (ID numbers, passport and license n
 - The bottom bar is docked to the bottom of the screen as a solid bar, so documents no longer show through or behind it.
 
 - Build 45: Financial now shows its illustrated icon too, so all 10 vault icons use Tracey's artwork.
+
+## Secure document sharing (Build 46)
+
+Original-scope work approved by Richard. Use Share document on the document screen. Choose a sharing password or keep the generated one (Build 48), confirm the account password, copy the generated share link, and send the sharing password through a separate channel. The link and passcode are shown only at creation and are not recoverable. Defaults: 24 hours, downloads disabled; expiration options range from 1 hour to 7 days. A private label helps distinguish recipients without exposing the label to them.
+
+Settings > Manage document sharing lists the owner's shares, statuses, expiration, counters, and the most recent 100 file opens/downloads per share. Owners can revoke future access. History records link use, not verified recipient identity; multiple browser requests can count as multiple file opens.
+
+Recipients need no account. They enter the passcode on a branded /share page, view the individual file, and see a download button only when authorized. Supported shared formats: JPEG, PNG, WebP and PDF. Saved metadata, other documents and vaults are not exposed. Text already inside the original file is shared. Documents stay private in storage and stream through an authorized app endpoint without exposing storage addresses.
+
+Link/passcode hashes only are stored; the link capability is in the URL fragment rather than a server-visible query/path. Recipient cookies are HttpOnly, share-scoped and expire within 15 minutes; expiration, revocation, deletion and owner suspension are checked on every file request. Passcode guessing and owner password confirmation are rate-limited. Recipient sharing is online-only and excluded from offline caching/sync.
+
+Viewing is not copy protection: screenshots, browser tools and PDF controls may save copies. Revocation cannot erase already delivered content. Recipient UI rechecks access every 15 seconds and hides content when the session ends or the connection is lost.
+
+Verification updated in Build 47: 47 runtime integration checks passed again, including real image/PDF transfer and security denials. A browser suite passed 13 checks across an authenticated disposable owner and an account-free recipient: creation, separate clipboard buttons, image decoding at phone width, close-session cleanup, offline hiding, history, live revocation, authorized PDF download, reload privacy, a same-origin iframe, incomplete links, and uncaught page errors. The browser owner session was supplied by the test fixture after an initial login-form timeout; this is not proof of browser login. Wrong-recipient-passcode denial passed at the API, but its browser error-message assertion failed twice and remains unverified. Real iOS/Android/GoodBarber testing remains outstanding; same-origin iframe checks do not prove native-shell or third-party-cookie compatibility. Disposable test users and files were removed. Preview only pending manual deploy. Emergency/trusted access and family profiles are not included.
+
+### Sharing preview and custom passwords (Build 48)
+
+The sender can now edit the generated sharing password or generate another one. The policy is 12 to 64 characters, including internal spaces and symbols, with no leading/trailing whitespace or control characters; Unicode is supported up to the 72-byte hashing limit. The sharing password must differ from the account password used for confirmation. Recipients enter the exact chosen password, without an account. Existing generated passcodes remain valid.
+
+Shared links use a dedicated 1200 x 1200 image composed from the current gold logo, with generic text only. Document content and saved details never enter the preview. Newly copied links include a preview version query parameter; the secret remains in the fragment. Older messages may retain cached previews.
+
+Build 48 verification: 70 server checks and 8 focused browser checks passed. Custom password creation/copying, actual no-account image viewing and same-origin iframe access were exercised. The image and metadata were verified in the VM browser, not in WhatsApp or a native mobile app. Build 47's outstanding device and wrong-password UI-message checks remain outstanding. Preview only pending manual deploy.

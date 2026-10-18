@@ -45,7 +45,8 @@ self.addEventListener("fetch", function (event) {
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   var path = url.pathname;
-  if (path.indexOf("/api/") === 0 || path.indexOf("/offline-test/") === 0) return;
+  // Shared documents are online-only. Never fall back to the owner's offline vault.
+  if (path === "/share" || path === "/shares" || path.indexOf("/api/") === 0 || path.indexOf("/offline-test/") === 0) return;
 
   if (req.mode === "navigate") {
     event.respondWith(

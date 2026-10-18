@@ -16,9 +16,11 @@ import {
   Eye,
   EyeOff,
   Maximize2,
+  Share2,
 } from "lucide-react";
 import { FolderIcon } from "@/components/app/folder-icon";
 import { ZoomViewer } from "@/components/app/zoom-viewer";
+import { ShareDialog } from "@/components/sharing/share-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -122,6 +124,7 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
   // Sensitive field values stay masked until the user confirms their password.
   const [revealed, setRevealed] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -514,11 +517,16 @@ export function DocumentScreen({ documentId }: { documentId: string }) {
             </div>
           )}
 
+          <Button className="mb-3 w-full" size="lg" onClick={() => setShareOpen(true)}>
+            <Share2 className="mr-2 h-5 w-5" /> Share document
+          </Button>
           <Button className="w-full" size="lg" variant="outline" onClick={handleDownload}>
             <Download className="mr-2 h-5 w-5" /> {isPdf ? "Download PDF" : "Download"}
           </Button>
         </>
       )}
+
+      {shareOpen && doc && <ShareDialog documentId={documentId} onClose={() => setShareOpen(false)} />}
 
       <ReauthDialog
         open={reauthOpen}

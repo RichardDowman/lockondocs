@@ -19,6 +19,12 @@ import type { NextRequest } from "next/server";
 export function middleware(_req: NextRequest) {
   const res = NextResponse.next();
   res.headers.delete("X-Frame-Options");
+  const path = _req.nextUrl.pathname;
+  if (path === "/share" || path === "/shares" || path.startsWith("/api/shared/") || path.startsWith("/api/shares")) {
+    res.headers.set("Cache-Control", "private, no-store, max-age=0");
+    res.headers.set("Referrer-Policy", "no-referrer");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  }
   return res;
 }
 

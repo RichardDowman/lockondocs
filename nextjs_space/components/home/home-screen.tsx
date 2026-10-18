@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { Plus, FileText, Loader2, FolderPlus, Search, ShieldCheck, Bell, AlarmClock, ChevronRight } from "lucide-react";
-import { FolderIcon, FOLDER_ICON_CHOICES } from "@/components/app/folder-icon";
+import { FolderIcon } from "@/components/app/folder-icon";
+import { VaultIconPicker } from "@/components/app/vault-icon-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface FolderItem {
@@ -256,7 +256,7 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
 
       {/* Create vault dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-[340px] rounded-[var(--radius-lg)]">
+        <DialogContent className="max-h-[90dvh] max-w-[340px] overflow-y-auto rounded-[var(--radius-lg)]">
           <DialogHeader>
             <DialogTitle className="font-display">New vault</DialogTitle>
           </DialogHeader>
@@ -272,24 +272,7 @@ export function HomeScreen({ userName, isAdmin = false }: { userName: string; is
               />
             </div>
             <div className="space-y-2">
-              <Label>Icon</Label>
-              <div className="grid grid-cols-5 gap-2">
-                {FOLDER_ICON_CHOICES.map((icon) => (
-                  <button
-                    key={icon}
-                    type="button"
-                    onClick={() => setNewIcon(icon)}
-                    className={cn(
-                      "flex h-11 items-center justify-center rounded-[var(--radius)] transition-colors",
-                      newIcon === icon
-                        ? "gold-surface text-primary-foreground"
-                        : "bg-accent text-muted-foreground hover:text-primary",
-                    )}
-                  >
-                    <FolderIcon name={icon} className="h-5 w-5" imageClassName="h-9 w-9" />
-                  </button>
-                ))}
-              </div>
+              <VaultIconPicker value={newIcon} onChange={setNewIcon} />
             </div>
           </div>
           <DialogFooter>

@@ -16,6 +16,7 @@ import {
   Download,
   Trash2,
   ShieldAlert,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -306,6 +307,10 @@ export function SettingsScreen() {
               </p>
             </div>
           </div>
+
+          <Button variant="outline" className="w-full" onClick={() => router.push("/shares")}>
+            <Share2 className="mr-2 h-4 w-4" /> Manage document sharing
+          </Button>
 
           {/* Admin panel entry */}
           {profile?.isAdmin && (

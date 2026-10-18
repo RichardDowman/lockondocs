@@ -939,3 +939,56 @@ Counter 44. Next review Build 45.
 Verification: type check and build pass, test_nextjs_project run. Not browser or phone tested.
 
 Counter 45. This is the 5-build review point (Builds 41 to 45); next review Build 50.
+
+## Build 46 (10/14/2026) - Secure no-account document sharing
+
+Richard confirmed sharing is outstanding original-scope work and approved the no-account, link-and-passcode approach. This supersedes earlier scope descriptions.
+
+- Share document button with owner password confirmation, required generated passcode, optional private label, 24-hour default expiry with choices up to 7 days, downloads off by default. Link and passcode are shown once and copied separately.
+- Owner management in Settings and on each document: paginated shares, revoke, and access history (most recent 100 file opens/downloads per share, lifetime counters). Creation/revocation appear in the existing activity log.
+- Recipient /share page needs no account and receives only the file, not saved metadata, owner filename, or vault access. Fragment token avoids server URL logs. Tokens stored SHA-256 hashed, passcodes bcrypt hashed. Share-specific HttpOnly cookies expire after 15 minutes or at link expiry, whichever is earlier.
+- Every file request checks expiration, revocation and active owner. Atomic database attempt limits: 10 recipient checks per share per 15 minutes and 5 owner confirmation checks per 15 minutes. Same-origin checks on writes; no-store/no-referrer/noindex headers. Private storage unchanged, no public objects or duplicated documents.
+- New additive DocumentShare/ShareAccess models and owner rate-limit fields applied without data reset. Deletion cascades remove shares/events. Existing per-user access routes preserved.
+- Recipient page bypasses owner lock/offline providers; service worker excludes sharing routes, registration URL versioned v=46. No shared files enter offline sync. Already delivered bytes, screenshots, or saved copies cannot be recalled; view-only is not copy protection. Open recipient UI checks access every 15 seconds.
+
+Verification: type check and production build passed. test_nextjs_project auth smoke succeeded, with the previously known Resend 422 test-address warning. scripts/test-sharing.ts passed 47 real runtime checks covering image/PDF bytes, permissions, foreign-account denial, hashes, metadata exclusion, expiry, revocation, suspension, concurrent guessing, history retention, cookie security, and deletion cascade. Disposable fixtures cleaned up. No browser UI or real iOS/Android/GoodBarber testing this build.
+
+Checkpoint only, not deployed. Counter 46. Next review Build 50.
+
+## Build 47 (10/14/2026) - Sharing end-to-end validation
+
+Richard asked to continue the sharing work to completion. Scope remains no-account recipients; no emergency access or family profiles. No additional production behavior changes were required by the checks that passed.
+
+- Added preview-only scripts/test-sharing-browser.ts and scripts/test-sharing-browser.py. They create disposable image/PDF fixtures, drive isolated owner and recipient browser contexts, and clean up their own records and private cloud files. Credentials stay in memory and travel through stdin; test logs do not print credentials or capability links. Python and browser automation are test-machine dependencies, not app runtime requirements.
+- Re-ran scripts/test-sharing.ts: 47 runtime checks passed, including actual file bytes, permissions, isolation, hashes, expiry, revocation, suspension, concurrent guessing, history retention, cookie security and deletion cascade.
+- Browser suite: 13 checks passed. Confirmed owner password rejection and clearing; share defaults, passcode regeneration and separate copy buttons; account-free recipient; image decoding at 390px without metadata or a download button; close-session cookie cleanup; offline hiding and re-entry; Settings management, history, cancel and revocation of an open share; seven-day PDF frame response and authorized download; reload privacy; same-origin phone-width iframe; incomplete-link recovery; no uncaught page errors in these flows.
+- Coverage limits: initial owner login-form attempt timed out, so the sharing suite used an authenticated disposable fixture rather than claiming browser login passed. The recipient wrong-passcode message assertion failed twice and was not retried; its API rejection passed. Real iOS/Android/GoodBarber, cross-origin native-shell storage behavior and native PDF rendering remain unverified. The same-origin iframe test does not prove those environments.
+- All sharing test fixtures were removed. Existing user documents were not changed. Updated current sharing verification notes in files.md and sharing_offline_review.md. Counter updated in CUSTOM_INSTRUCTIONS.md.
+
+Type check, production compilation and authentication API smoke checks passed; the known test-address email warning remains unrelated to sharing. Checkpoint only, not deployed. Counter 47. Next review Build 50.
+
+## Build 48 (10/15/2026) - Clear sharing preview and sender-selected passwords
+
+Richard reported the poor WhatsApp sharing image and requested sender-selected sharing passwords. Published /share metadata was checked and still pointed to the old blue scanner graphic.
+
+- Added a dedicated 1200 x 1200 square share-preview-v48.png using the existing gold logo, readable LockonDocs branding and generic secure-sharing text. /share now provides explicit Open Graph/Twitter metadata with a request-host image URL. No document images, labels, names, or credentials enter the preview metadata. Other pages retain their existing metadata.
+- New copied links use /share?v=48#<token> to distinguish the preview version from older cached cards. Existing links remain supported; messaging apps may retain older previews until refreshed. No claim of WhatsApp rendering verification.
+- Sharing password is now editable, with the generated option retained. Supports 12 to 64 characters including internal spaces, symbols and Unicode; rejects outer whitespace/control characters, account-password reuse and values above bcrypt's 72-byte limit. Shared client/server validation; exact password comparison without recipient-side trimming. Only hashes are stored. Account password confirmation remains separate. Existing generated passcodes remain compatible.
+- Extended runtime suite: 70 checks passed, covering custom-password policy, hash-only storage, Unicode and maximum lengths, no-account unlock, existing generated passwords and the prior security regression checks. Initial expanded fixture run hit the existing owner rate limit; fixture policy cases now reset only their own disposable owner's counter. Production rate limits unchanged.
+- Scoped browser suite: 8 checks passed for generic metadata, public image decoding, editable/generated password, short-password validation, separate copying, actual no-account image viewing and same-origin phone-width iframe unlock, with no uncaught page errors. Initial browser connection required opening the VM browser; the first recipient assertion incorrectly treated anonymous CSRF cookies as account sessions and was corrected to check session cookies specifically. Disposable fixtures cleaned up.
+- Type check, production compilation and auth API smoke checks passed. Known Resend 422 test-address warning unchanged. No schema change or existing document changes. Real WhatsApp/iOS/Android/GoodBarber rendering, cross-origin behavior and the previously outstanding wrong-recipient-password UI assertion are not verified by this build.
+
+Checkpoint only, not deployed. Counter 48. Next review Build 50.
+
+## Build 49 (10/16/2026) - Custom vault icon library
+
+Richard supplied LockOnDocs_40_Vault_Icons.zip and requested a branded icon selection flow for new custom folders, without increasing or replacing default folders. All 40 supplied 1024px PNGs decoded successfully and already had true transparency; compositing the full set on a neutral background showed no pink backdrop to remove.
+
+- Prepared 40 transparent 192px images in public/vault-icons/library-v49, preserving the supplied artwork with trimmed empty margins and consistent padding. Original default artwork paths are untouched.
+- Added lib/vault-icon-library.ts with separate library-01 through library-40 keys and US English labels. The new catalog is not used by registration or seed code. The existing 10 default folder definitions, signup behavior and schema are unchanged.
+- New custom vault dialog has a Choose an icon control with search, labels, selected state, empty-results feedback and a bounded scrollable grid. Selection collapses back to a preview. Existing Rename picker is unchanged. Shared FolderIcon supports saved library keys and falls back to a line icon if an image fails.
+- Asset checks passed for all 40 transparent 192px PNGs. Type check, production compilation and authentication smoke checks passed after correcting a missing password field in the disposable test fixture. The known test-address email warning remains unrelated to this feature.
+- Scoped browser checks passed: all 40 icons render/decode at phone width; search and empty results; selection and cancel without creating folders; custom vault creation in a same-origin phone-width iframe; saved icon after reload and in the folder header. Direct database check confirmed exactly one custom fixture vault and all 10 defaults unchanged. No uncaught page errors. The first run used an overly specific tile accessible-name assertion; the second used the visible vault label and passed. Disposable fixtures were removed.
+- Real handset, cross-origin GoodBarber and native-shell behavior remain unverified. No existing user folders or documents were changed. Updated files.md and build counters.
+
+Checkpoint only, not deployed. Counter 49. Next review Build 50.

@@ -38,7 +38,7 @@
 
 ### Build Tracking
 
-- **Build counter:** Track all builds in `build_state.md`. Current counter: 45.
+- **Build counter:** Track all builds in `build_state.md`. Current counter: 49.
 - **Prompt the user** to review/update `build_state.md` every 5 build updates.
 - `build_state.md` is **always additive** - never remove entries, only append new ones.
 
@@ -108,7 +108,7 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 
 ### Phase C - Access security (built, Build 31)
 - Auto-lock (choices 1, 3, 5, 10 minutes or Never; default 5) that also locks on return when the app has been left in the background for at least that same period (Build 34 changed this from locking on any return), masked sensitive field values that require a password reveal, and a re-authentication endpoint. The lock is an in-app overlay, not a sign-out, so the GoodBarber session survives, and it is never shown straight after a sign-in.
-- Still open (need a separate go-ahead): document sharing, multi-person profiles, encryption at rest (accepted risk, not built). Sharing and offline access are reviewed in `sharing_offline_review.md` (Build 40).
+- Secure document sharing: original-scope work approved by Richard, implemented in Build 46. No recipient account; required passcode delivered separately, owner password confirmation, expiring/revocable links, optional downloads, access history. See files.md. Multi-person profiles, emergency access and application-level encryption remain outside this implementation.
 
 ## Key Contacts
 
@@ -127,5 +127,5 @@ These are the tiers from Tracey's Digital Vault Architecture brief, tracked sepa
 | Docs format | .md |
 | Currency | GBP (USD at ~1.27) |
 | Data sensitivity | High (PII, medical, school) |
-| Build counter | 45 |
+| Build counter | 49 |
 | Current phase | Phases 1 and 2 complete; client Phases A, B and C built (Builds 25 to 31); Phase 3 (GoodBarber) next |

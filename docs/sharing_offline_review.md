@@ -1,5 +1,13 @@
 # Document Sharing and Offline Access - Review
 
+## Current sharing decision and implementation (10/14/2026, Build 46)
+
+Richard confirmed sharing is outstanding original-scope work, not a new separately quoted addition. This supersedes every contrary scope statement in the historical Build 40 review below. Richard approved no-account sharing with a required passcode delivered separately. Build 46 implements owner password confirmation, a 24-hour default expiration (up to 7 days), optional downloads, revocation, and access history. Recipients receive only the file, not saved metadata or vault access. See files.md for current behavior and limitations. Emergency access and family profiles are not included.
+
+Verification updated in Build 47: 47 runtime integration checks passed again using temporary image and PDF fixtures. A browser suite passed 13 checks covering owner creation, separate copy buttons, account-free viewing, closing, offline hiding, access history, revocation of an open share, PDF download, reload privacy, and a same-origin phone-width iframe. Fixtures were removed. The browser login form was not verified; owner flows used an authenticated test fixture. The recipient wrong-passcode message assertion remains unverified after two attempts, although API rejection passed. Real phone and GoodBarber testing remains outstanding. Sharing is preview-only until manually deployed.
+
+The remaining sections are the historical Build 40 review, not current status. Offline implementation progressed separately in Builds 41 to 43; consult build_state.md and offline_plan.md.
+
 ## Overview
 
 | Field | Value |
@@ -131,3 +139,9 @@ The full delivery plan is in offline_plan.md.
 2. Agree the commercial treatment of offline access first.
 3. Run the offline proof of concept inside the GoodBarber app before quoting offline work.
 4. Start sharing with Step 1 (secure share links), which delivers the brief's "restricted sharing" and "limited exposure by default" without changing the data model.
+
+## Build 48 sharing update (10/15/2026)
+
+Sender-selected sharing passwords are implemented alongside generation, with a shared 12-to-64-character policy and a 72-byte hashing limit. Account confirmation remains separate, recipients still need no account, and existing passcodes remain compatible. Secure links now have a dedicated high-resolution gold-logo preview with no document information. New link/image versioning helps avoid reusing the old preview.
+
+Verification: 70 runtime checks and 8 scoped browser checks passed. WhatsApp rendering and real-device/GoodBarber behavior remain unverified. Checkpoint only; no deployment in this build. Offline behavior was not changed.

@@ -18,7 +18,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Image from "next/image";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { VAULT_ICON_LIBRARY } from "@/lib/vault-icon-library";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   folder: Folder,
@@ -51,6 +53,7 @@ const ARTWORK: Record<string, string> = {
   lock: "/vault-icons/lock.png",
   "heart-pulse": "/vault-icons/heart-pulse.png",
   wallet: "/vault-icons/wallet.png",
+  ...Object.fromEntries(VAULT_ICON_LIBRARY.map((icon) => [icon.id, icon.src])),
 };
 
 export function hasFolderArtwork(name?: string | null): boolean {
@@ -68,10 +71,11 @@ export function FolderIcon({
   imageClassName?: string;
 }) {
   const src = ARTWORK[name ?? ""];
-  if (src) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (src && failedSrc !== src) {
     return (
       <span className={cn("relative inline-block shrink-0", imageClassName ?? className)}>
-        <Image src={src} alt="" fill sizes="64px" className="object-contain" />
+        <Image src={src} alt={VAULT_ICON_LIBRARY.find((icon) => icon.id === name)?.label ?? `${name ?? "Folder"} vault icon`} fill sizes="64px" className="object-contain" onError={() => { console.error("Vault icon failed to load:", src); setFailedSrc(src); }} />
       </span>
     );
   }

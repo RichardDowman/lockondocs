@@ -39,6 +39,9 @@ model User {
   passwordResetTokens PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
   auditLogs           AuditLog[]
+  documentShares      DocumentShare[]
+  shareAuthAttempts   Int        @default(0)
+  shareAuthWindow     DateTime?
 
   @@index([email])
 }
@@ -138,6 +141,41 @@ model Document {
   @@index([folderId])
   @@index([userId, folderId])
   @@index([userId, expiryDate])
+  shares           DocumentShare[]
+}
+
+model DocumentShare {
+  id              String   @id @default(cuid())
+  userId          String
+  documentId      String
+  tokenHash       String   @unique
+  passcodeHash    String
+  label           String   @default("")
+  allowDownload   Boolean  @default(false)
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime @default(now())
+  attemptCount    Int      @default(0)
+  attemptWindow   DateTime?
+  viewCount       Int      @default(0)
+  downloadCount   Int      @default(0)
+  lastAccessAt    DateTime?
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  events          ShareAccess[]
+
+  @@index([userId, createdAt, id])
+  @@index([documentId, createdAt, id])
+}
+
+model ShareAccess {
+  id        String   @id @default(cuid())
+  shareId   String
+  action    String
+  createdAt DateTime @default(now())
+  share     DocumentShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId, createdAt, id])
 }
 
 // Records every transactional email the app sends (reminders, resets,

@@ -21,7 +21,7 @@ export const OFFLINE_NEEDS_PASSWORD_EVENT = "lockondocs:offline-needs-password";
 export const OFFLINE_SIZE_CAP_BYTES = 250 * 1024 * 1024;
 
 const PBKDF2_ITERATIONS = 310000;
-const SW_URL = "/sw.js";
+const SW_URL = "/sw.js?v=46";
 
 export interface OfflineKeyring {
   userId: string;
@@ -289,7 +289,10 @@ async function unregisterOfflineWorker() {
     const regs = await navigator.serviceWorker.getRegistrations();
     await Promise.all(
       regs
-        .filter((r) => (r.active || r.waiting || r.installing)?.scriptURL.endsWith(SW_URL))
+        .filter((r) => {
+          const url = (r.active || r.waiting || r.installing)?.scriptURL;
+          return !!url && new URL(url).pathname === "/sw.js";
+        })
         .map((r) => r.unregister()),
     );
     const keys = await caches.keys();
